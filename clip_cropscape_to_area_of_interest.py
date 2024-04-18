@@ -19,7 +19,7 @@ def clip_cropscape_to_area_of_interest(input_folder= '/input', clip_shape= '/inp
   # create output folder
   if (not os.path.isdir(dir_path + output_folder)): 
     print('creating output folder...')
-    os.mkdir(dir_path + output_folder)
+    os.makedirs(dir_path + output_folder)
     print('  ☑ Done')
     
   # create clipped cropscape rasters for every raster in the input folder
