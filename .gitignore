@@ -1,3 +1,5 @@
 .venv/
 input/
 output/
+working/
+__pycache__/
