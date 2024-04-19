@@ -120,7 +120,7 @@ def consolidate_cropland(input_raster_path: str, output_raster_path: str):
     
     return recalc
  
-def consilidate_all_cropland(input_folder: str, output_folder: str):
+def consilidate_cropland_in_folder(input_folder: str, output_folder: str):
   dir_path = os.path.dirname(os.path.realpath(__file__))
 
   # create output folder

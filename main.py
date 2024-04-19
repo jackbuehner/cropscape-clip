@@ -5,4 +5,4 @@ from consolidate_cropland import consilidate_all_cropland
 clip_cropscape_to_area_of_interest('/input', '/input/area_of_interest.shp', '/working/clipped')
 
 # consolidate similar pixel classes, inlcuing all cropland classes
-consilidate_all_cropland('/working/clipped', '/output')
+consilidate_cropland_in_folder('/working/clipped', '/output')
