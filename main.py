@@ -16,7 +16,7 @@ status.start()
 
 # limit to our area of interest by clipping first, which will also make subsequent steps faster
 status.update('Clipping cropscape data to area of interest...')
-clip_cropscape_to_area_of_interest('/input', '/input/area_of_interest.shp', '/working/clipped')
+clip_cropscape_to_area_of_interest('./input', './input/area_of_interest.shp', './working/clipped')
 console.log('Cropscape data clipped to area of interest')
 
 # consolidate similar pixel classes, including all cropland classes
