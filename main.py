@@ -19,7 +19,7 @@ status.update('Clipping cropscape data to area of interest...')
 clip_cropscape_to_area_of_interest('/input', '/input/area_of_interest.shp', '/working/clipped')
 console.log('Cropscape data clipped to area of interest')
 
-# consolidate similar pixel classes, inlcuing all cropland classes
+# consolidate similar pixel classes, including all cropland classes
 status.update('Consolidating cropland classes...')
 consilidate_cropland_in_folder('/working/clipped', '/output/consolidated')
 console.log('Cropland classess consolidated')
@@ -47,4 +47,4 @@ for filename in sorted(os.listdir('./output/consolidated')):
     })
 with open('./output/summary_data.json', "w") as file:
   json.dump(summary_data, file, indent=2) 
-  console.log('Summary dat saved to ./output/summary_data.json')
+  console.log('Summary data saved to ./output/summary_data.json')
