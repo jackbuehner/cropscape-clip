@@ -33,7 +33,7 @@ def clip_raster(raster: DatasetReader | str, clip_shape: GeoDataFrame | str, fea
   if isinstance(raster, str):
     if status: status.update(f'{status_prefix}Opening raster...')
     _raster = rasterio.open(raster)
-    if status: status.console.log(f'{status_prefix}Raster opened')
+    if status: status.console.log(f'{status_prefix}Raster opened from {raster}')
     should_close_raster = True # we will need to close it when we are done
   elif isinstance(raster, DatasetReader):
     _raster = raster
@@ -43,8 +43,8 @@ def clip_raster(raster: DatasetReader | str, clip_shape: GeoDataFrame | str, fea
 
   # get the clip shape as a GeoDataFrame with only a single feature
   clip_shp_original: GeoDataFrame
-  if status: status.update(f'{status_prefix}Reading input feature layer...')
   if isinstance(clip_shape, str):
+    if status: status.update(f'{status_prefix}Reading input feature layer from {clip_shape}...')
     # if a file path is provided, read the file to a geodatframe
     # and then create a GeoDataFrame with only the first feature
     geodataframe = geopandas.read_file(clip_shape)
@@ -53,6 +53,7 @@ def clip_raster(raster: DatasetReader | str, clip_shape: GeoDataFrame | str, fea
       crs=geodataframe.crs,
       geometry=[geodataframe.iloc[0]['geometry']]
     )
+    if status: status.console.log(f'{status_prefix}Feature layer opened from {clip_shape}')
   elif isinstance(clip_shape, GeoDataFrame):
     if (feature_indices is not None):
       if status: status.update(f'{status_prefix}Selecting specified input feature layer features...')
@@ -64,13 +65,14 @@ def clip_raster(raster: DatasetReader | str, clip_shape: GeoDataFrame | str, fea
         crs=clip_shape.crs,
         geometry=[clip_shape.iloc[feature_indices]['geometry']]
       )
-      if status: status.update(f'{status_prefix}Specified input feature layer features selected')
+      if status: status.console.log(f'{status_prefix}Specified input feature layer features selected')
     else:
       # otherwise, pass throguh the provided geodataframe
+      if status: status.update(f'{status_prefix}Reading input feature layer GeoDataFrame...')
       clip_shp_original = clip_shape
+      if status: status.console.log(f'{status_prefix}Input feature layer GeoDataFrame read')
   else:
     raise ValueError('clip_shape must be a string or a geopandas.geodataframe.GeoDataFrame')
-  if status: status.update(f'{status_prefix}Input feature layer read')
     
   # reproject the clip shape to match the raster projection
   # because rasterio requires matching projections for masking (clipping)
