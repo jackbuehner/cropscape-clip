@@ -1,12 +1,16 @@
 import json
 import os
+import time
 
 import rich
 
 from clip_cropscape_to_area_of_interest import \
     clip_cropscape_to_area_of_interest
+from compute_raster_class_difference import compute_raster_class_difference
 from reclassify_raster import reclassify_rasters
 from summarize_raster import summarize_raster
+
+start_time = time.time()
 
 console = rich.console.Console()
 status = console.status('[bold green]Working...[/bold green]')
@@ -82,6 +86,66 @@ for filename in sorted(os.listdir('./output/consolidated')):
 with open('./output/summary_data.json', "w") as file:
   json.dump(summary_data, file, indent=2) 
   console.log('Summary data saved to ./output/summary_data.json')
+
+consolidated_rasters_list = sorted([str for str in os.listdir('./output/consolidated') if str.endswith("_30m_cdls.tif")])
+consolidated_rasters_summary_data = []
+for (index, filename) in enumerate(consolidated_rasters_list):
+  if index > 0:  
+    file_path = './output/consolidated' + '/' + filename
+    file_root, file_ext = os.path.splitext(file_path)
+    year = filename[0:4]
+    last_year = consolidated_rasters_list[index - 1][0:4]
+    
+    file_last_year = f'./output/consolidated/{last_year}_30m_cdls.tif'
+    file_this_year = f'./output/consolidated/{year}_30m_cdls.tif'
+    file_diff_root = f'./output/diff/{last_year}_{year}'
+    
+    status.update(f'Computing difference between {last_year} and {year}...')
+    compute_raster_class_difference(
+      file_last_year,
+      file_this_year,
+      {
+        1: { 'color': (255, 0, 0), 'name': 'crops to developed', 'from': [1], 'to': [10, 11, 12, 13, 14] },
+        2: { 'color': (0, 255, 0), 'name': 'crops to forest', 'from': [1], 'to': [4] },
+        3: { 'color': (255, 255, 0), 'name': 'crops to idle', 'from': [1], 'to': [2] },
+        4: { 'color': (0, 0, 255), 'name': 'crops to grassland, shrubland, barren, or wetlands', 'from': [1], 'to': [3, 5, 6, 21, 22] },
+        5: { 'color': (20, 20, 20), 'name': 'crops to crops', 'from': [1], 'to': [1] },
+        10: { 'color': (20, 20, 20), 'name': 'other to crops', 'from': [2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 21, 22], 'to': [1] },
+      },
+      f'{file_diff_root}.tiff',
+    )
+    console.log(f'Difference between {last_year} and {year} computed')
+    
+    status.update(f'Summarizing difference between {last_year} and {year} (may take a while)...')
+    for zcta_filename in sorted(os.listdir('./input/zcta')):
+      if (zcta_filename.endswith('.shp')):
+        zcta_file_path = './input/zcta' + '/' + zcta_filename
+        zcta_file_root, zcta_file_ext = os.path.splitext(zcta_file_path)
+        zcta_year = int(zcta_file_root[-4:])
+        id_key = 'ZCTA5CE10' if zcta_year >= 2010 and zcta_year < 2020 else 'ZCTA5CE20' if zcta_year > 2020 else None
+        consolidated_rasters_summary_data.append({
+          'cropland_year_start': int(last_year),
+          'cropland_year_end': int(year),
+          'zcta_year': zcta_year,
+          'data': summarize_raster(
+            f'{file_diff_root}.tiff',
+            f'{file_root}.json',
+            f'./input/zcta/{zcta_filename}',
+            id_key,
+            f'./working/diff/zcta/{zcta_year}',
+            status=status,
+            status_prefix=f'[{last_year}-{year}|zcta{zcta_year}] '
+          ) 
+        })
+    console.log(f'Difference between {last_year} and {year} summarized')
+with open('./output/consolidated_rasters_summary_data.json', "w") as file:
+  json.dump(consolidated_rasters_summary_data, file, indent=2) 
+  console.log('Consolidated rasters summary data saved to ./output/consolidated_rasters_summary_data.json')
+
+status.stop()
+end_time = time.time()
+
+console.log(f'Elapsed time: {end_time - start_time} seconds')
 
 data_dictionary_str = '''
 Data Dictionary: USDA National Agricultural Statistics Service, Cropland Data Layer 
