@@ -57,18 +57,28 @@ for filename in sorted(os.listdir('./output/consolidated')):
     file_path = './output/consolidated' + '/' + filename
     file_root, file_ext = os.path.splitext(file_path)
     year = filename[0:4]
-    summary_data.append({
-      'cropland_year': int(year),
-      'zcta_year': 2010,
-      'data': summarize_raster(
-        f'{file_root}.tif',
-        f'{file_root}.json',
-        './input/US_zcta_2010.shp',
-        './working/zcta',
-        status=status,
-        status_prefix=f'[{year}|2010] '
-      ) 
-    })
+    
+    for zcta_filename in sorted(os.listdir('./input/zcta')):
+      if (zcta_filename.endswith('.shp')):
+        zcta_file_path = './input/zcta' + '/' + zcta_filename
+        zcta_file_root, zcta_file_ext = os.path.splitext(zcta_file_path)
+        zcta_year = int(zcta_file_root[-4:])
+        id_key = 'ZCTA5CE10' if zcta_year >= 2010 and zcta_year < 2020 else 'ZCTA5CE20' if zcta_year > 2020 else None
+        summary_data.append({
+          'cropland_year': int(year),
+          'zcta_year': zcta_year,
+          'data': summarize_raster(
+            f'{file_root}.tif',
+            f'{file_root}.json',
+            f'./input/zcta/{zcta_filename}',
+            id_key,
+            f'./working/zcta/{zcta_year}',
+            status=status,
+            status_prefix=f'[{year}|{zcta_year}] '
+          ) 
+        })
+        console.log(f'Summary data for {year} and {zcta_year} saved')
+    
 with open('./output/summary_data.json', "w") as file:
   json.dump(summary_data, file, indent=2) 
   console.log('Summary data saved to ./output/summary_data.json')
