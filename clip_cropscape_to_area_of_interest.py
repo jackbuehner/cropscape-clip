@@ -17,6 +17,11 @@ def clip_cropscape_to_area_of_interest(input_folder: str = './input', clip_shape
     clip_shape (str): Path to the shapefile defining the area of interest.
     output_folder (str): Path to the folder where the clipped rasters will be saved.
   """
+  # make the output folder if it does not exist
+  if (not os.path.isdir(output_folder)): 
+    os.makedirs(output_folder)
+  
+  # clip
   for folder in sorted(os.listdir(input_folder)):
     folder_path = input_folder + '/' + folder
     if os.path.isdir(folder_path):
