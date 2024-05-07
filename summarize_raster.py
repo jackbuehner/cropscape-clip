@@ -15,7 +15,7 @@ from clip_raster import clip_raster
 
 console = rich.console.Console()
 
-def summarize_raster(input_raster_path: str, summary_output_path: str, feature_layer_path: str | None = None, breakdown_output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '') -> dict[str, Any]:
+def summarize_raster(input_raster_path: str, summary_output_path: str, feature_layer_path: str | None = None, id_key: str | None = None, breakdown_output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '') -> dict[str, Any]:
   '''
   Generate summary metadata for an input raster.
   - pixel counts for each class
@@ -31,6 +31,7 @@ def summarize_raster(input_raster_path: str, summary_output_path: str, feature_l
     input_raster_path (str): The path to the input raster.
     summary_output_path (str): The path to the output json file.
     feature_layer_path (str | None): The path to the feature layer to use for breakdown. If None, no breakdown will be generated.
+    id_key (str | None): The key to use as the ID for each feature in the breakdown. If None, no breakdown will be generated.
     breakdown_output_folder_path (str | None): The path to the folder where breakdown tiff and json files will be saved. If None, no breakdown will be generated.
     
   Returns:
@@ -53,8 +54,8 @@ def summarize_raster(input_raster_path: str, summary_output_path: str, feature_l
   clipped_pixel_class_counts = dict(zip(clipped_pixel_classes.tolist(), clipped_pixel_counts.tolist()))
   if status: status.console.log(f'{status_prefix}Raster pixels parsed')
   
-  if feature_layer_path:
-    breakdown_metadata = process_feature_layer(raster, feature_layer_path, 'ZCTA5CE10', breakdown_output_folder_path, status=status, status_prefix=status_prefix)
+  if feature_layer_path and id_key:
+    breakdown_metadata = process_feature_layer(raster, feature_layer_path, id_key, breakdown_output_folder_path, status=status, status_prefix=status_prefix)
     
    # metadata for the feature
   feature_metadata = {
@@ -97,7 +98,7 @@ def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key
   
   # the zip codes that belong to south carolina are those that start with '29'
   if status: status.update(f'{status_prefix}Filtering feature layer to South Carolina...')
-  feature_layer = feature_layer[feature_layer['ZCTA5CE10'].str.startswith('29')]
+  feature_layer = feature_layer[feature_layer[id_key].str.startswith('29')]
   feature_layer = feature_layer.reset_index(drop=True)
   if status: status.console.log(f'{status_prefix}Filtered feature layer to South Carolina')
   
