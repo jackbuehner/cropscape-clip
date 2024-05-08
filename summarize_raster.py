@@ -56,7 +56,9 @@ def summarize_raster(input_raster_path: str, summary_output_path: str, feature_l
   
   if feature_layer_path and id_key:
     breakdown_metadata = process_feature_layer(raster, feature_layer_path, id_key, breakdown_output_folder_path, status=status, status_prefix=status_prefix)
-    
+  else:
+    breakdown_metadata = None
+  
    # metadata for the feature
   feature_metadata = {
     # 'ID': row['ID'],
