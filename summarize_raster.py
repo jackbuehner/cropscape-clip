@@ -15,7 +15,7 @@ from clip_raster import clip_raster
 
 console = rich.console.Console()
 
-def summarize_raster(input_raster_path: str, summary_output_path: str, feature_layer_path: str | None = None, id_key: str | None = None, breakdown_output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '') -> dict[str, Any]:
+def summarize_raster(input_raster_path: str, summary_output_path: str | None = None, feature_layer_path: str | None = None, id_key: str | None = None, breakdown_output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '') -> dict[str, Any]:
   '''
   Generate summary metadata for an input raster.
   - pixel counts for each class
@@ -29,10 +29,10 @@ def summarize_raster(input_raster_path: str, summary_output_path: str, feature_l
   
   Args:
     input_raster_path (str): The path to the input raster.
-    summary_output_path (str): The path to the output json file.
+    summary_output_path (str | None): The path to the output json file. If None, no summary will be saved to file.
     feature_layer_path (str | None): The path to the feature layer to use for breakdown. If None, no breakdown will be generated.
     id_key (str | None): The key to use as the ID for each feature in the breakdown. If None, no breakdown will be generated.
-    breakdown_output_folder_path (str | None): The path to the folder where breakdown tiff and json files will be saved. If None, no breakdown will be generated.
+    breakdown_output_folder_path (str | None): The path to the folder where breakdown tiff and json files will be saved. If None, no breakdown will be saved to file.
     
   Returns:
     dict[str, Any]: The summary metadata for the input raster.
@@ -69,10 +69,11 @@ def summarize_raster(input_raster_path: str, summary_output_path: str, feature_l
   }
     
   # save the feature metadata to json
-  if status: status.update(f'{status_prefix}Saving metadata...')
-  with open(summary_output_path, "w") as file:
-    json.dump(feature_metadata, file, indent=2) 
-    if status: status.console.log(f'{status_prefix}Metadata saved to {summary_output_path}')
+  if summary_output_path:
+    if status: status.update(f'{status_prefix}Saving metadata...')
+    with open(summary_output_path, "w") as file:
+      json.dump(feature_metadata, file, indent=2) 
+      if status: status.console.log(f'{status_prefix}Metadata saved to {summary_output_path}')
   
   # remove the lock on the raster
   raster.close()
