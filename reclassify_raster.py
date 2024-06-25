@@ -28,7 +28,7 @@ def reclassify_raster(input_raster_path: str, output_raster_path: str, remap: Pi
     # open the raster and lock it in the filesystem while working on it
     raster = rasterio.open(input_raster_path)
     band1: numpy.typing.NDArray[Any] = raster.read(1)
-    
+        
     # reclassify based on the provided specifications
     reclassified = copy.deepcopy(band1)
     for key, value in remap.items():
@@ -56,7 +56,7 @@ def reclassify_raster(input_raster_path: str, output_raster_path: str, remap: Pi
     
     return reclassified
  
-def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapSpecs) -> None:
+def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapSpecs, silent: bool = False) -> None:
   '''
   Relcaassify all rasters in the input folder based on the provided remap specification.
   
@@ -76,21 +76,21 @@ def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapS
 
   # create output folder
   if (not os.path.isdir(dir_path + output_folder)): 
-    print('creating output folder...')
+    if not silent: print('creating output folder...')
     os.makedirs(dir_path + output_folder)
-    print('  ☑ Done')
+    if not silent: print('  ☑ Done')
     
   
   # process for every raster in the input folder
   for filename in sorted(os.listdir(dir_path + input_folder)):
     file_path = dir_path + input_folder + '/' + filename
-    if filename.endswith("_30m_cdls.tif"):
-      print(f'processing {filename}...')
+    if filename.endswith(".tif") or filename.endswith(".tiff"):
+      if not silent: print(f'processing {filename}...')
       year = filename[0:4]
       
-      reclassify_raster(file_path, f'{dir_path}{output_folder}/{year}_30m_cdls.tif', remap)
+      reclassify_raster(file_path, f'{dir_path}{output_folder}/{filename}', remap)
       
-      print('  ☑ Done')
+      if not silent: print('  ☑ Done')
 
-  print('🏁 Finished')
+  if not silent: print('🏁 Finished')
   
