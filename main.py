@@ -6,7 +6,8 @@ import rich
 
 from clip_cropscape_to_area_of_interest import \
     clip_cropscape_to_area_of_interest
-from compute_raster_class_difference import PixelDiffSpecs, compute_raster_class_difference
+from compute_raster_diffference_matrices import \
+    compute_raster_difference_matrices
 from reclassify_raster import PixelRemapSpecs, reclassify_rasters
 from summarize_raster import summarize_raster
 
@@ -65,7 +66,7 @@ def main():
 
   # create a list containing the paths to all consilidated rasters
   # so we can easily loop through them later
-  consolidated_rasters_list = sorted([str for str in os.listdir(CONSOLIDATED_RASTERS_FOLDER) if str.endswith("_30m_cdls.tif")])
+  consolidated_rasters_list = sorted([(f'{CONSOLIDATED_RASTERS_FOLDER}/{str}', int(str[0:4])) for str in os.listdir(CONSOLIDATED_RASTERS_FOLDER) if str.endswith("_30m_cdls.tif")], key=lambda x: x[1])
 
   # create a list containing the paths to all zcta shapefiles
   # so we can easily loop through them later
@@ -75,11 +76,17 @@ def main():
   # and store it in the `summary_data` list
   status.update('Generating summary data for each cropland data year...')
   summary_data = []
-  for (index, filename) in enumerate(consolidated_rasters_list):
-    file_root, _, year = get_raster_info_from_path(f'{CONSOLIDATED_RASTERS_FOLDER}/{filename}')
+  for (index, (file_path, year)) in enumerate(consolidated_rasters_list):
+    file_root = os.path.splitext(file_path)[0]
     
-    for (zcta_index, zcta_filename) in enumerate(zcta_shapefiles_list):
-      _, _, zcta_year, zcta_attr = get_zcta_info_from_path(f'{ZCTA_SHAPES_FOLDER}/{zcta_filename}')
+    for (zcta_index, zcta_filename) in enumerate(zcta_shapefiles_list):      
+      zcta_file_root, zcta_file_ext = os.path.splitext(f'{ZCTA_SHAPES_FOLDER}/{zcta_filename}')
+      zcta_year = int(zcta_file_root[-4:])
+      
+      # this is shapefile column/attribute name to use as the identifier
+      # for each shape that is being summarized for a ZCTA year
+      # (for shapefiles from NHGIS)
+      zcta_attr = 'ZCTA5CE10' if zcta_year >= 2010 and zcta_year < 2020 else 'ZCTA5CE20' if zcta_year > 2020 else None
       
       summary_data.append({
         'cropland_year': year,
@@ -101,59 +108,36 @@ def main():
     json.dump(summary_data, file, indent=2) 
     console.log('Summary data saved to ./output/summary_data.json')
 
-  # compute the difference between adjacent year consolidated rasters
-  # for select pixel classes and summarize the difference for each ZCTA shape
-  consolidated_rasters_summary_data = []
-  for (index, filename) in enumerate(consolidated_rasters_list):
-    if index > 0:
-      file_root, _, year = get_raster_info_from_path(f'{CONSOLIDATED_RASTERS_FOLDER}/{filename}')
-      last_year = int(consolidated_rasters_list[index - 1][0:4])
-      
-      file_last_year = f'{CONSOLIDATED_RASTERS_FOLDER}/{last_year}_30m_cdls.tif'
-      file_this_year = f'{CONSOLIDATED_RASTERS_FOLDER}/{year}_30m_cdls.tif'
-      file_diff_root = f'./output/diff/{last_year}_{year}'
-      
-      status.update(f'Computing difference between {last_year} and {year}...')
-      compute_raster_class_difference(
-        file_last_year,
-        file_this_year,
-        {
-          1: { 'color': (255, 0, 0), 'name': 'crops to developed', 'from': [1], 'to': [10, 11, 12, 13, 14] },
-          2: { 'color': (0, 255, 0), 'name': 'crops to forest', 'from': [1], 'to': [4] },
-          3: { 'color': (255, 255, 0), 'name': 'crops to idle', 'from': [1], 'to': [2] },
-          4: { 'color': (0, 0, 255), 'name': 'crops to grassland, shrubland, barren, or wetlands', 'from': [1], 'to': [3, 5, 6, 21, 22] },
-          5: { 'color': (20, 20, 20), 'name': 'crops to crops', 'from': [1], 'to': [1] },
-          10: { 'color': (20, 20, 20), 'name': 'other to crops', 'from': [2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 21, 22], 'to': [1] },
-        },
-        f'{file_diff_root}.tiff',
-      )
-      console.log(f'Difference between {last_year} and {year} computed')
-      
-      status.update(f'Summarizing difference between {last_year} and {year} (may take a while)...')
-      for (zcta_index, zcta_filename) in enumerate(zcta_shapefiles_list):
-        _, _, zcta_year, zcta_attr = get_zcta_info_from_path(f'{ZCTA_SHAPES_FOLDER}/{zcta_filename}')
-        
-        consolidated_rasters_summary_data.append({
-          'cropland_year_start': int(last_year),
-          'cropland_year_end': int(year),
-          'zcta_year': zcta_year,
-          'data': summarize_raster(
-            f'{file_diff_root}.tiff',
-            f'{file_root}.json',
-            f'{ZCTA_SHAPES_FOLDER}/{zcta_filename}',
-            zcta_attr,
-            f'{ZCTA_CLIPPED_AND_SUMMARY_STATS_FOLDER}/diff/{zcta_year}',
-            status=status,
-            status_prefix=f'[{last_year}-{year}|zcta{zcta_year}] '
-          ) 
-        })
-      console.log(f'Difference between {last_year} and {year} summarized')
-      
-  # save the `consolidated_rasters_summary_data` list to JSON file
-  with open(ZCTA_DIFF_SUMMARY_FILE, "w") as file:
-    json.dump(consolidated_rasters_summary_data, file, indent=2) 
-    console.log('Consolidated rasters summary data saved to ./output/consolidated_rasters_summary_data.json')
+  
+  # compute the difference between consolidated rasters for the whole area of interest (AOI)
+  diffs_aoi = compute_raster_difference_matrices(consolidated_rasters_list, reclass_spec, status=status)
+  for (name, diff_matrix) in zip(diffs_aoi[0], diffs_aoi[1]):
 
+    # make the output folder if it does not exist
+    if (not os.path.isdir('./output/diff')): 
+      os.makedirs('./output/diff')
+
+    diff_matrix.to_csv(f'./output/diff/{name}.csv')
+  
+  # also compute the difference for each ZCTA shape
+  for year_str in os.listdir(ZCTA_CLIPPED_AND_SUMMARY_STATS_FOLDER):
+    year = int(year_str)
+    pathname = f'{ZCTA_CLIPPED_AND_SUMMARY_STATS_FOLDER}/{year}'
+    if (not os.path.isdir(pathname)): continue
+    for zcta in sorted(os.listdir(f'{ZCTA_CLIPPED_AND_SUMMARY_STATS_FOLDER}/{year}')):
+      pathname = f'{ZCTA_CLIPPED_AND_SUMMARY_STATS_FOLDER}/{year}/{zcta}'
+      if (not os.path.isdir(pathname)): continue
+      
+      # make the output folder if it does not exist
+      output_folder = f'./output/diff/zcta/{zcta}'
+      if (not os.path.isdir(output_folder)): 
+        os.makedirs(output_folder)
+      
+      rasters = sorted([(f'{pathname}/{filename}', int(filename[0:4])) for filename in os.listdir(pathname) if filename.endswith(f'_30m_cdls__US_zcta_{year}.tiff') and filename[0:4].isdigit()], key=lambda x: x[1])
+      diffs_zcta = compute_raster_difference_matrices(rasters, reclass_spec, status=status, status_prefix=f'<zcta»{year}»{zcta}> ')
+      for (name, diff_matrix) in zip(diffs_zcta[0], diffs_zcta[1]):
+        diff_matrix.to_csv(f'{output_folder}/{name}.csv')
+  
   status.stop()
   end_time = time.time()
 
@@ -179,54 +163,4 @@ reclass_spec: PixelRemapSpecs = {
   255: { 'color': (0, 0, 0), 'name': 'missing', 'original': [] }
 }
 
-diff_spec: PixelDiffSpecs = {
-  1: { 'color': (255, 0, 0), 'name': 'crops to developed', 'from': [1], 'to': [10, 11, 12, 13, 14] },
-  2: { 'color': (0, 255, 0), 'name': 'crops to forest', 'from': [1], 'to': [4] },
-  3: { 'color': (255, 255, 0), 'name': 'crops to idle', 'from': [1], 'to': [2] },
-  4: { 'color': (0, 0, 255), 'name': 'crops to grassland, shrubland, barren, or wetlands', 'from': [1], 'to': [3, 5, 6, 21, 22] },
-  5: { 'color': (20, 20, 20), 'name': 'crops to crops', 'from': [1], 'to': [1] },
-  10: { 'color': (20, 20, 20), 'name': 'other to crops', 'from': [2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 21, 22], 'to': [1] },
-}
-
-def get_raster_info_from_path(path: str) -> tuple[str, str, int]:
-  """
-  Retrieves information about a raster file from the given path.
-
-  Args:
-    path (str): The path to the raster file.
-
-  Returns:
-    tuple: A tuple containing the following information:
-      - raster_file_path (str): The full path to the raster file.
-      - raster_file_root (str): The root name of the raster file without the extension.
-      - raster_file_ext (str): The extension of the raster file.
-      - raster_year (int): The year extracted from the raster file name.
-  """
-  raster_file_root, raster_file_ext = os.path.splitext(path)
-  raster_year = int(raster_file_root[0:4])
-  return (raster_file_root, raster_file_ext, raster_year)
-
-def get_zcta_info_from_path(path: str) -> tuple[str, str, int, str | None]:
-  """
-  Retrieves information about a ZCTA file from the given path.
-
-  Args:
-    path (str): The path to the ZCTA file.
-
-  Returns:
-    tuple: A tuple containing the following information:
-      - zcta_file_path (str): The full path to the ZCTA file.
-      - zcta_file_root (str): The root name of the ZCTA file without the extension.
-      - zcta_file_ext (str): The extension of the ZCTA file.
-      - zcta_year (int): The year extracted from the ZCTA file name.
-      - id_key (str): The attribute name to use as the identifier for each shape an NHGIS ZCTA shapefile.
-  """
-  zcta_file_root, zcta_file_ext = os.path.splitext(path)
-  zcta_year = int(zcta_file_root[-4:])
-  
-  # this is shapefile column/attribute name to use as the identifier
-  # for each shape that is being summarized for a ZCTA year
-  # (for shapefiles from NHGIS)
-  id_key = 'ZCTA5CE10' if zcta_year >= 2010 and zcta_year < 2020 else 'ZCTA5CE20' if zcta_year > 2020 else None
-
-  return (zcta_file_root, zcta_file_ext, zcta_year, id_key)
+main()
