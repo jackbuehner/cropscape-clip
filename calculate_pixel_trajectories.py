@@ -66,17 +66,18 @@ def calculate_pixel_trajectories(raster_folder_path: str, reclass_spec: PixelRem
       
       # calculate the difference between the rasters for the current and last year
       # so that we can see what changed between the two years
-      # (e.g, for crops, 1 = new cropland, 0 = lost croplond OR no change)
+      # (e.g, for crops, 1 = new cropland, 254 = lost croplond)
       array = compute_raster_class_difference(
-        file_path,
         prev_file_path,
+        file_path,
         { 
           1: { 'color': (67, 96, 236), 'name': 'new', 'from': [0], 'to': [1] }, 
-          -1: { 'color': (67, 96, 236), 'name': 'new', 'from': [1], 'to': [0] }
-        }
+          254: { 'color': (255, 51, 50), 'name': 'new', 'from': [1], 'to': [0] }
+        },
+        # f'{temp_folder_path or "./TEMPORARY"}/diff/{class_num}/{prev_year}_{year}.tiff',
       )
       diff_dict[class_num][f'{prev_year}_{year}'] = array
-    
+  
   # create a multidemensial array that contains the change for each class each year for each pixel
   # rows x columns x depth = class x year x pixel
   if status: status.update(f'{status_prefix}Constructing pixel array structure...')
