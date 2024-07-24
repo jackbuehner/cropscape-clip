@@ -134,7 +134,7 @@ def calculate_pixel_trajectories(raster_folder_path: str, reclass_spec: PixelRem
     with open(output_trajectories_file, 'w') as file:
       json.dump(sorted_trajectory_counts, file, indent=2, ensure_ascii=False)
     
-  # shutil.rmtree(temp_folder_path or './TEMPORARY')
+  shutil.rmtree(temp_folder_path or './TEMPORARY')
   
   if status: status.console.log(f'{status_prefix}Finished computing pixel trajectories')
   return sorted_trajectory_counts
