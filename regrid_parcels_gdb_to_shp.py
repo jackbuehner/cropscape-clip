@@ -22,7 +22,11 @@ def regrid_parcels_gdb_to_shp(geodatabases_folder_path: str, output_shp_folder_p
   
   start_time = time.time()
   
-  geodatabase_paths = [f'{geodatabases_folder_path}/{name}' for name in os.listdir(geodatabases_folder_path)]
+  # make the output folder if it does not exist
+  if (not os.path.isdir(output_shp_folder_path)): 
+    os.makedirs(output_shp_folder_path)
+  
+  geodatabase_paths = [f'{geodatabases_folder_path}/{name}' for name in os.listdir(geodatabases_folder_path) if name.endswith('.gdb')]
   geodatabase_paths_length = len(geodatabase_paths)
   print(f'Found {geodatabase_paths_length} geodatabase files in {geodatabases_folder_path}')
   
@@ -54,10 +58,15 @@ def geodataframe_from_geodatabase(geodatabase_path: str, layer_name: str, column
   Returns:
     geopandas.GeoDataFrame: A GeoDataFrame containing the data from the layer.
   """
+  print(f'{status_prefix}Processing {geodatabase_path.split("/")[-1]}/{layer_name}{status_suffix}...')
+  
+  crs = ''
+  with fiona.open(geodatabase_path, layer=layer_name) as source:
+    crs = source.crs
+    
   def records():
-    with fiona.open(geodatabase_path, layer=layer_name) as source:
-      print(f'{status_prefix}Reading features from {geodatabase_path.split("/")[-1]}/{layer_name}{status_suffix}...')
-      for feature in alive_it(source):
+    with fiona.open(geodatabase_path, layer=layer_name) as source:      
+      for feature in alive_it(source, title=f'Reading features'):
         
         # create a copy of the feature with only the id and geometry
         f = { k: feature[k] for k in ['id', 'geometry'] }
@@ -73,4 +82,4 @@ def geodataframe_from_geodatabase(geodatabase_path: str, layer_name: str, column
         # and we want the result to continue to be a generator
         yield f
       
-  return geopandas.GeoDataFrame.from_features(records())
+  return geopandas.GeoDataFrame.from_features(records(), crs=crs)
