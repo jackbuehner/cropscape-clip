@@ -1,14 +1,16 @@
 import math
 import os
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count
-import time
-from typing import Generator
+from typing import Any, Generator
 
 import fiona
 import geopandas
-from alive_progress import alive_bar, config_handler
+from alive_progress import alive_bar
 from shapely.geometry import shape
+
+from multiprocess_counter import multiprocess_counter
 
 
 def filter_spatial_within(input_layer_path: str, filter_layer_path: str, output_layer_path: str, *, invert: bool = False) -> None:
@@ -64,7 +66,8 @@ def filter_spatial_within(input_layer_path: str, filter_layer_path: str, output_
   print(f'Finished in {end_time - start_time:.2f} seconds ({(end_time - start_time) / 60:.2f} minutes)')
     
  
-  
+def pr(new_counter_value):
+  print('new', new_counter_value)
 
 def process_layer(input_layer_path: str, filter_layer_path: str, output_layer_path: str, *, invert: bool = False, layer_name: str | None = None, current: int = 1, total: int = 1) -> None:
   monitor=('{count}/{total} [{percent:.0%}]' + f' ⟨{layer_name} – {current}/{total}⟩') if layer_name else '{count}/{total} [{percent:.0%}]'
@@ -81,41 +84,45 @@ def process_layer(input_layer_path: str, filter_layer_path: str, output_layer_pa
     
   def batched_records(batch_size: int | None = None) -> Generator[fiona.Feature, None, None]:
     
-    with fiona.open(input_layer_path, layer=layer_name) as layer, alive_bar(len(layer), title='Filtering features', monitor=monitor) as bar, ProcessPoolExecutor() as executor:
-      auto_batch_size = math.ceil(len(layer) / (cpu_count() - 1))
-      
-      futures = []
+    with fiona.open(input_layer_path, layer=layer_name) as layer:
+      with alive_bar(len(layer), title='Filtering features', monitor=monitor) as bar:
+        with multiprocess_counter(lambda new_counter_value, old_counter_value: bar(new_counter_value - old_counter_value)) as (shared_counter, lock), ProcessPoolExecutor() as executor:
+          auto_batch_size = math.ceil(len(layer) / (cpu_count() - 1))
+          
+          futures = []
+        
+          # queue each batch of features to be filtered in a separate process
+          for chunk in chunker(layer, batch_size if batch_size else auto_batch_size):
+            future = executor.submit(__filter_features, chunk, filter_geom, invert, shared_counter, lock)
             
-      # queue each batch of features to be filtered in a separate process
-      for chunk in chunker(layer, batch_size if batch_size else auto_batch_size):
-        future = executor.submit(__filter_features, chunk, filter_geom, invert)
-        # print(f'chunk size {len(chunk)}')
-        future.add_done_callback(lambda future: bar(future.result()[1])) # increment the progress bar as each future completes
-        futures.append(future)
-      
-      complete_batches = 0
-      for future in as_completed(futures):
-        complete_batches += 1
-        # print(f'completed {complete_batches} out of {len(chunk)} batches')
-        None # wait for all futures to complete
-      
-      # yield the results of the futures in the order they were submitted
-      # (we want to preserve order of features in the output layer)
-      for future in futures:
-        res = future.result()
-        if res: yield res[0]
+            # print(f'chunk size {len(chunk)}')
+            futures.append(future)
+          
+          complete_batches = 0
+          for future in as_completed(futures):
+            complete_batches += 1
+            # print(f'completed {complete_batches} out of {len(chunk)} batches')
+            None # wait for all futures to complete
+          
+      with alive_bar(len(futures), title='Compiling chunks', monitor=monitor) as bar:          
+        # yield the results of the futures in the order they were submitted
+        # (we want to preserve order of features in the output layer)
+        for future in futures:
+          res = future.result()
+          if res: 
+            bar()
+            yield res[0]
 
-  def records():
-    # flatten the batched records
-    return [record for records in batched_records() for record in records]
+  records = [record for records in batched_records() for record in records]
   
-  gdf = geopandas.GeoDataFrame.from_features(records(), crs=input_layer_crs)
+  with alive_bar(title='Creating GeoDataFrame', monitor=False) as bar:
+    gdf = geopandas.GeoDataFrame.from_features(records, crs=input_layer_crs)
   
-  with alive_bar(title='Saving to layer to package' if layer_name else 'Saving output layer') as bar:
+  with alive_bar(title='Saving to layer to package' if layer_name else 'Saving output layer', monitor=False) as bar:
     gdf.to_file(output_layer_path, layer=layer_name, driver='GPKG' if output_layer_path.endswith('.gpkg') else 'ESRI Shapefile')
     bar()
 
-def __filter_features(features, filter_geom, invert):
+def __filter_features(features, filter_geom, invert, shared_counter, lock):
   """
   Filters a list of features based on whether they are within a given filter geometry.
 
@@ -138,6 +145,8 @@ def __filter_features(features, filter_geom, invert):
     
     if is_within_any_filter_layer_feature:
       features_to_return.append(feature)
+      
+    with lock: shared_counter.value += 1
 
   return (features_to_return, len(features))
 
