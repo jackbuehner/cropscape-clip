@@ -7,7 +7,7 @@ import fiona
 import geopandas
 import pandas
 import rich
-from alive_progress import alive_bar, alive_it, config_handler
+from alive_progress import alive_bar, alive_it
 
 from calculate_pixel_trajectories import calculate_pixel_trajectories
 from clip_cropscape_to_area_of_interest import \
@@ -64,7 +64,7 @@ def apply_cdl_data_to_parcels(
   # such that cropland is a single pixel value. Other pixel types are also
   # grouped together (e.g, all forest, all develolped land, all cropland, etc.).
   status.update('Consolidating cropland classes...')
-  reclassify_rasters(clipped_rasters_folder[1:], consolidated_rasters_folder[1:], reclass_spec)
+  reclassify_rasters(clipped_rasters_folder, consolidated_rasters_folder, reclass_spec)
   console.log('Cropland classess consolidated')
 
   # create a list containing the paths to all consilidated rasters
