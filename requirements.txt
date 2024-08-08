@@ -17,6 +17,7 @@ exceptiongroup==1.2.1
 executing==2.0.1
 fiona==1.9.5
 fonttools==4.51.0
+GDAL==3.4.1
 geopandas==0.14.3
 grapheme==0.6.0
 ipykernel==6.29.4
@@ -41,7 +42,10 @@ prompt-toolkit==3.0.43
 psutil==5.9.8
 ptyprocess==0.7.0
 pure-eval==0.2.2
+pyarrow==17.0.0
+pygdaltools==1.4.2
 Pygments==2.17.2
+pyogrio==0.9.0
 pyparsing==3.1.1
 pyproj==3.6.1
 python-dateutil==2.8.2
