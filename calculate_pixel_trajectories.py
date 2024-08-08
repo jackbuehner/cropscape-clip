@@ -30,13 +30,13 @@ def calculate_pixel_trajectories(raster_folder_path: str, reclass_spec: PixelRem
     # create rasters from each consolidated raster that only indicates 1 or 0
     # for a single pixel class (e.g., 1 = developed, 0 = not developed)
     reclassify_rasters(
-      raster_folder_path[1:],
-      f'{temp_folder_path or "./TEMPORARY"}/boolean_class/{class_num}'[1:],
+      raster_folder_path,
+      f'{temp_folder_path or "./TEMPORARY"}/boolean_class/{class_num}',
       {
         1: { 'color': (85, 237, 252), 'name': spec["name"], 'original': [class_num] },
         0: { 'color': (0, 0, 0), 'name': f'not {spec["name"]}', 'original': list(range(1, class_num)) + list(range(class_num + 1, 256)) }
       },
-      silent=True
+      False
     )
 
   # for each class, calculate the difference between the boolean rasters
