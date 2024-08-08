@@ -64,10 +64,6 @@ def filter_spatial_within(input_layer_path: str, filter_layer_path: str, output_
   
   end_time = time.time()
   print(f'Finished in {end_time - start_time:.2f} seconds ({(end_time - start_time) / 60:.2f} minutes)')
-    
- 
-def pr(new_counter_value):
-  print('new', new_counter_value)
 
 def process_layer(input_layer_path: str, filter_layer_path: str, output_layer_path: str, *, invert: bool = False, layer_name: str | None = None, current: int = 1, total: int = 1) -> None:
   monitor=('{count}/{total} [{percent:.0%}]' + f' ⟨{layer_name} – {current}/{total}⟩') if layer_name else '{count}/{total} [{percent:.0%}]'
