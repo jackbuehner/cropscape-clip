@@ -36,7 +36,8 @@ def calculate_pixel_trajectories(raster_folder_path: str, reclass_spec: PixelRem
         1: { 'color': (85, 237, 252), 'name': spec["name"], 'original': [class_num] },
         0: { 'color': (0, 0, 0), 'name': f'not {spec["name"]}', 'original': list(range(1, class_num)) + list(range(class_num + 1, 256)) }
       },
-      False
+      False,
+      use_multiprocessing=False
     )
 
   # for each class, calculate the difference between the boolean rasters

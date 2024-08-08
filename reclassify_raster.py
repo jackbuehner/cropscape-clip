@@ -56,7 +56,7 @@ def reclassify_raster(input_raster_path: str, output_raster_path: str, remap: Pi
   
     return reclassified
 
-def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapSpecs, show_progress_bar: bool = True) -> None:
+def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapSpecs, show_progress_bar: bool = True, use_multiprocessing: bool = True) -> None:
   '''
   Relcaassify all rasters in the input folder based on the provided remap specification.
   
@@ -84,17 +84,26 @@ def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapS
       files_to_process.append((filename, file_path))
           
   # reclssify and save the rasters to the output folder using multiprocessing
-  with alive_bar(len(files_to_process), title='Reclassifying rasters', disable=not show_progress_bar) as bar, ProcessPoolExecutor() as executor:
-    futures: list[Future[numpy.typing.NDArray[Any]]] = []
+  with alive_bar(len(files_to_process), title='Reclassifying rasters', disable=not show_progress_bar) as bar:
     
-    # queue each function to be executed
-    for filename, file_path in files_to_process:
-      out_file_path = f'{output_folder}/{filename}'
-      future = executor.submit(reclassify_raster, file_path, out_file_path, remap)
-      futures.append(future)
-      sleep(1)
+    if use_multiprocessing:
+      with ProcessPoolExecutor() as executor:
+        futures: list[Future[numpy.typing.NDArray[Any]]] = []
         
-    # increment the progress bar as each future completes
-    for future in as_completed(futures):
-      bar()
+        # queue each function to be executed
+        for filename, file_path in files_to_process:
+          out_file_path = f'{output_folder}/{filename}'
+          future = executor.submit(reclassify_raster, file_path, out_file_path, remap)
+          futures.append(future)
+          sleep(1)
+            
+        # increment the progress bar as each future completes
+        for future in as_completed(futures):
+          bar()
+          
+    else:
+      for filename, file_path in files_to_process:
+        out_file_path = f'{output_folder}/{filename}'
+        reclassify_raster(file_path, out_file_path, remap)
+        bar()
   
