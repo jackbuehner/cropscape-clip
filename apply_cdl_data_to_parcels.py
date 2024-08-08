@@ -99,8 +99,7 @@ def apply_cdl_data_to_parcels(
   with open(f'{parcels_summary_file_root}.json', "w") as file:
     with alive_bar(title='Saving summary data JSON', monitor=False):
       json.dump(summary_data, file, indent=2) 
-    
-  
+
   # create tidy data from the summary data
   tidy = []
   for entry in alive_it(summary_data, title="Creating tidy data"):
@@ -112,13 +111,26 @@ def apply_cdl_data_to_parcels(
     tidy_df = pandas.json_normalize(tidy)
     # convert the id to a string with length 13
     tidy_df['id'] = tidy_df['id'].apply('{:0>13}'.format)
+    console.log(f'Summary data saved to {parcels_summary_file_root}.json')
   
   # save the `summary_data` list to tidy CSV file
   with alive_bar(title='Saving tidy data CSV', monitor=False):
     tidy_df.to_csv(f'{parcels_summary_file_root}.csv', index=False)
-      
-  console.log(f'Summary data saved to {parcels_summary_file_root}.json')
-  console.log(f'Tidy summary data saved to {parcels_summary_file_root}.csv')
+    console.log(f'Tidy summary data saved to {parcels_summary_file_root}.csv')
+    
+  # join summary data to parcels shapefile
+  merged_with_summaries_gdf = join_pixel_counts_to_featurs(
+    parcels_shp_path=parcels_shp_path,
+    tidy_df=tidy_df,
+    reclass_spec=reclass_spec,
+    id_key=id_key
+  )
+  
+  # save the merged data to a geopackage
+  with alive_bar(title=f'Saving parcels with CDL counts to geopackage {parcels_gpkg_output_path}', monitor=False):
+    merged_with_summaries_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL counts', driver='GPKG')
+  
+  print(f'Elapsed time: {time.time() - start_time} seconds ({(time.time() - start_time) / 60} minutes)')
   
   # generate trajectory data for each cropland data year and parcel
   trajectories = []
@@ -161,6 +173,7 @@ def apply_cdl_data_to_parcels(
   with open(f'{parcels_trajectories_file_root}.json', "w") as file:
     with alive_bar(title='Saving trajectories data JSON', monitor=False):
       json.dump(trajectories, file, indent=2) 
+      console.log(f'Pixel trajectories saved to {parcels_summary_file_root}.json')
   
   # save the `tidy_trajectories` list to tidy CSV file
   with alive_bar(title='Saving trajectories data CSV', monitor=False):
@@ -168,25 +181,20 @@ def apply_cdl_data_to_parcels(
     # convert the id to a string with length 13
     trajectories_df[id_key] = trajectories_df[id_key].apply('{:0>13}'.format)
     trajectories_df.to_csv(f'{parcels_trajectories_file_root}.csv', index=False)
+    console.log(f'Tidy pixel trajectories data saved to {parcels_summary_file_root}.csv')
       
-  console.log(f'Pixel trajectories saved to {parcels_summary_file_root}.json')
-  console.log(f'Tidy pixel trajectories data saved to {parcels_summary_file_root}.csv')
-  
-  # join summary and trajectory data into parcels shapefile
-  merged_gdf = join_pixel_counts_and_trajectories_to_features(
+  # join trajectory data to parcels shapefile
+  merged_with_trajectories_gdf = join_pixel_trajectories_to_features(
     parcels_shp_path=parcels_shp_path,
-    tidy_df=tidy_df,
     trajectories_df=trajectories_df,
-    reclass_spec=reclass_spec,
     id_key=id_key
   )
   
   # save the merged data to a geopackage
-  merged_gdf.to_file(parcels_gpkg_output_path, layer='parcels', driver='GPKG')
+  merged_with_trajectories_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL pixel trajectories', driver='GPKG')
   
   end_time = time.time()
-
-  console.log(f'Elapsed time: {end_time - start_time} seconds ({(end_time - start_time) / 60} minutes)')
+  print(f'Elapsed time: {end_time - start_time} seconds ({(end_time - start_time) / 60} minutes)')
 
 def generate_summary_data(
   consolidated_rasters_list: list[tuple[str, int]],
@@ -239,10 +247,9 @@ def generate_summary_data(
           data = future.result()
           if data: yield { 'cropland_year': year, 'data': data }
 
-def join_pixel_counts_and_trajectories_to_features(
+def join_pixel_counts_to_featurs(
   parcels_shp_path: geopandas.GeoDataFrame,
   tidy_df: pandas.DataFrame,
-  trajectories_df: pandas.DataFrame,
   reclass_spec: PixelRemapSpecs,
   id_key: str,
 ) -> geopandas.GeoDataFrame:
@@ -299,7 +306,17 @@ def join_pixel_counts_and_trajectories_to_features(
   
   # open the parcels shapefile and join the pixel summaries to the features
   with fiona.open(parcels_shp_path) as layer:
-    parcels_gdf = geopandas.GeoDataFrame.from_features(records(layer), crs=layer.crs)
+    merged_gdf = geopandas.GeoDataFrame.from_features(records(layer), crs=layer.crs)
+    
+    return merged_gdf
+  
+def join_pixel_trajectories_to_features(
+  parcels_shp_path: geopandas.GeoDataFrame,
+  trajectories_df: pandas.DataFrame,
+  id_key: str,
+) -> geopandas.GeoDataFrame:
+  with alive_bar(title='Opening parcels shapefile', monitor=False):
+    parcels_gdf = geopandas.read_file(parcels_shp_path)
   
   with alive_bar(title='Joining pixel trajectories to features', monitor=False):  
     # merge the trajectories data frame with the parcels features
@@ -309,4 +326,3 @@ def join_pixel_counts_and_trajectories_to_features(
     )
     
   return merged_gdf
-  
