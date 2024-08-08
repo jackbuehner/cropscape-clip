@@ -1,5 +1,7 @@
 from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 import json
+import math
+from multiprocessing import cpu_count
 import os
 import time
 from typing import Any, Generator
@@ -138,7 +140,7 @@ def apply_cdl_data_to_parcels(
   parcels_gdf = geopandas.read_file(parcels_shp_path, engine='pyogrio', use_arrow=True)
   with alive_bar(len(parcels_gdf), title='Generating trajectories (slow)') as bar:
     
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(math.floor((cpu_count() - 1) / 2)) as executor:
       futures: list[tuple[Any, Future[dict[str, int]]]] = []
             
       for index, feature in parcels_gdf.iterrows():
@@ -253,62 +255,73 @@ def join_pixel_counts_to_featurs(
   reclass_spec: PixelRemapSpecs,
   id_key: str,
 ) -> geopandas.GeoDataFrame:
-  def records(layer: fiona.Collection) -> Generator[Any, Any, None]:
-    """
-    Processes each record in a layer and joins matching pixel counts to the feature properties.
-    """
-    for feature in alive_it(layer, title='Joining pixel counts to features'):
-      # create a copy of the feature with only the id and geometry
-      f = { k: feature[k] for k in ['id', 'geometry'] }
-        
-      pixel_summaries_tidy = tidy_df.loc[tidy_df['id'] == feature['properties'][id_key]].copy()
-      
-      # calcualte a field that is the sum of all developed land classes
-      pixel_summaries_tidy['developed_total'] = \
-        pixel_summaries_tidy['pixel_counts.10'] if 'pixel_counts.10' in pixel_summaries_tidy.columns else 0 + \
-        pixel_summaries_tidy['pixel_counts.11'] if 'pixel_counts.11' in pixel_summaries_tidy.columns else 0 + \
-        pixel_summaries_tidy['pixel_counts.12'] if 'pixel_counts.12' in pixel_summaries_tidy.columns else 0 + \
-        pixel_summaries_tidy['pixel_counts.13'] if 'pixel_counts.13' in pixel_summaries_tidy.columns else 0 + \
-        pixel_summaries_tidy['pixel_counts.14'] if 'pixel_counts.14' in pixel_summaries_tidy.columns else 0
-      
-      # calcualte a field that is the sum of all cropland and grassland classes
-      pixel_summaries_tidy['cropland_and_grassland_total'] = \
-        pixel_summaries_tidy['pixel_counts.1'] if 'pixel_counts.1' in pixel_summaries_tidy.columns else 0 + \
-        pixel_summaries_tidy['pixel_counts.3'] if 'pixel_counts.3' in pixel_summaries_tidy.columns else 0
-      
-      # pivot the data so that there is one row for each id
-      # and there are two labels for each column
-      # (cropland_year and one of the original columns)
-      pixel_summaries_tidy = pixel_summaries_tidy.pivot(index='id', columns='cropland_year')
-      
-      # flatten the dual-label columns into a single-label column
-      def rename(x):
-        column, year = x
-        
-        if column.find('pixel_counts.') > -1:
-          pixel_class = int(column.replace('pixel_counts.', ''))
-          pixel_class_name = reclass_spec[254 if pixel_class == 0 else pixel_class]['name']
-          return f'CDL{year}_{pixel_class_name}'
-        
-        return f'CDL{year}_{column}'
-      pixel_summaries_tidy.columns = pixel_summaries_tidy.columns.map(rename)
-      
-      # merge the values of duplicate columns by transposing, grouping by
-      # the first level, summing, and then transposing back
-      # (class 254 and class 0 have the same column name)
-      pixel_summaries_tidy = pixel_summaries_tidy.T.groupby(level=0).sum().T
-      
-      # join the pixel summaries to the feature properties
-      pixel_summaries_dict = { key: value[feature['properties'][id_key]] for key, value in pixel_summaries_tidy.to_dict().items()}
-      f['properties'] = { **feature['properties'], **pixel_summaries_dict }
-      
-      yield f
   
-  # open the parcels shapefile and join the pixel summaries to the features
-  with fiona.open(parcels_shp_path) as layer:
-    merged_gdf = geopandas.GeoDataFrame.from_features(records(layer), crs=layer.crs)
+  def calculate_and_rename_columns() -> geopandas.GeoDataFrame:
+    """
+    Renames columns to use pixel class names and years.
     
-    return merged_gdf
+    Also calculates a few extra columns for each feature.
+    """
+    pixel_summaries_tidy = tidy_df.copy()
+
+    # calcualte a field that is the sum of all developed land classes
+    pixel_summaries_tidy['developed_total'] = \
+      pixel_summaries_tidy['pixel_counts.10'] if 'pixel_counts.10' in pixel_summaries_tidy.columns else 0 + \
+      pixel_summaries_tidy['pixel_counts.11'] if 'pixel_counts.11' in pixel_summaries_tidy.columns else 0 + \
+      pixel_summaries_tidy['pixel_counts.12'] if 'pixel_counts.12' in pixel_summaries_tidy.columns else 0 + \
+      pixel_summaries_tidy['pixel_counts.13'] if 'pixel_counts.13' in pixel_summaries_tidy.columns else 0 + \
+      pixel_summaries_tidy['pixel_counts.14'] if 'pixel_counts.14' in pixel_summaries_tidy.columns else 0
+
+    # calcualte a field that is the sum of all cropland and grassland classes
+    pixel_summaries_tidy['cropland_and_grassland_total'] = \
+      pixel_summaries_tidy['pixel_counts.1'] if 'pixel_counts.1' in pixel_summaries_tidy.columns else 0 + \
+      pixel_summaries_tidy['pixel_counts.3'] if 'pixel_counts.3' in pixel_summaries_tidy.columns else 0
+
+    # pivot the data so that there is one row for each id
+    # and there are two labels for each column
+    # (cropland_year and one of the original columns)
+    pixel_summaries_tidy = pixel_summaries_tidy.pivot(index='id', columns='cropland_year')
+      
+    # flatten the dual-label columns into a single-label column
+    def rename(x):
+      column, year = x
+      
+      if column.find('pixel_counts.') > -1:
+        pixel_class = int(column.replace('pixel_counts.', ''))
+        pixel_class_name = reclass_spec[254 if pixel_class == 0 else pixel_class]['name']
+        return f'CDL{year}_{pixel_class_name}'
+      
+      return f'CDL{year}_{column}'
+    pixel_summaries_tidy.columns = pixel_summaries_tidy.columns.map(rename)
+
+    # merge the values of duplicate columns by transposing, grouping by
+    # the first level, summing, and then transposing back
+    # (class 254 and class 0 have the same column name)
+    pixel_summaries_tidy = pixel_summaries_tidy.T.groupby(level=0).sum().T
+
+    # show the index as a column
+    # and use the id_key as the column name so that we can join the data to the parcels shapefile
+    pixel_summaries_tidy[id_key] = pixel_summaries_tidy.index
+
+    # make the id field the first field
+    pixel_summaries_tidy = pixel_summaries_tidy[[id_key] + [col for col in pixel_summaries_tidy.columns if col != id_key]]
+
+    return pixel_summaries_tidy
+
+  with alive_bar(title='Opening parcels shapefile', monitor=False):
+    parcels_gdf = geopandas.read_file(parcels_shp_path)
+  
+  with alive_bar(title='Processing summary columns', monitor=False):
+    pixel_summaries_tidy = calculate_and_rename_columns()
+  
+  with alive_bar(title='Joining with summary data', monitor=False):  
+    # merge the pixel summaries data frame with the parcels features
+    merged_gdf = geopandas.GeoDataFrame(
+      parcels_gdf
+        .merge(pixel_summaries_tidy, on=id_key)
+    )
+    
+  return merged_gdf
   
 def join_pixel_trajectories_to_features(
   parcels_shp_path: geopandas.GeoDataFrame,
