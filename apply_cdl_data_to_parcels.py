@@ -1,3 +1,4 @@
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 import json
 import os
 import time
@@ -12,6 +13,7 @@ from alive_progress import alive_bar, alive_it
 from calculate_pixel_trajectories import calculate_pixel_trajectories
 from clip_cropscape_to_area_of_interest import \
     clip_cropscape_to_area_of_interest
+from multiprocess_counter import multiprocess_counter
 from reclassify_raster import PixelRemapSpecs, reclassify_rasters
 from summarize_raster import summarize_raster
 
@@ -75,33 +77,19 @@ def apply_cdl_data_to_parcels(
   # and store it in the `summary_data` list
   status.update('Generating summary data for each cropland data year...')
   status.stop()
-  summary_data = []
-  summary_data += generate_summary_data(
-                    consolidated_rasters_list[0:1],
-                    parcels_shp_path,
-                    clipped_parcels_rasters_folder,
-                    id_key,
-                    status=status
-                  )
-  
-  summary_data += generate_summary_data(
-                    consolidated_rasters_list[-1:],
-                    parcels_shp_path,
-                    clipped_parcels_rasters_folder,
-                    id_key,
-                    status=status
-                  )
-  
-  summary_data += generate_summary_data(
-                    consolidated_rasters_list[1:-1],
-                    parcels_shp_path,
-                    clipped_parcels_rasters_folder,
-                    id_key,
-                    status=status
+  reordered_consolidated_rasters_list = consolidated_rasters_list[0:1] + consolidated_rasters_list[-1:] + consolidated_rasters_list[1:-1]
+  summary_data =  list(
+                    generate_summary_data(
+                      reordered_consolidated_rasters_list,
+                      parcels_shp_path,
+                      clipped_parcels_rasters_folder,
+                      id_key,
+                      status=status,
+                    )
                   )
   
     
-  console.log('Saving summary data for rasters within all input features...')  
+  console.log('Saving summary data for rasters within all input features...')
   
   # save the `summary_data` list to JSON file
   summary_data_folder_path = os.path.dirname(parcels_summary_file)
@@ -193,34 +181,49 @@ def generate_summary_data(
   id_key: str,
   *,
   status: rich.status.Status
-) -> list[dict[str, object]]:
+) -> Generator[dict[str, object], None, None]:
   """
   Summarizes the raster data within each parcel in the parcels shapefile and returns
   the results as a list of dictionaries with pixel counts and other metadata.
   """
   
-  summary_data = []
-  for (index, (file_path, year)) in enumerate(consolidated_rasters_list):
-    file_root = os.path.splitext(file_path)[0]
-      
-    status.console.log(f'Summarizing raster within {parcels_shp_path} for {year}...')
-          
-    summary_data.append({
-      'cropland_year': year,
-      'data': summarize_raster(
-        f'{file_root}.tif',
-        None,
-        parcels_shp_path,
-        id_key,
-        clipped_parcels_rasters_folder,
-        # status=status,
-        # status_prefix=f'[{year}] '
-        show_progress_bar=True
-      ) 
-    })
-    status.console.log(f'Summary data for {year} created') 
+  # get the feature count for the shapefile
+  with fiona.open(parcels_shp_path) as source:
+    feature_count = len(list(source))
     
-  return summary_data
+  # calculate the total features to be processed across all years
+  total_features = feature_count * len(consolidated_rasters_list)
+  
+  with alive_bar(total_features, title='Generating summary data') as bar:
+    with multiprocess_counter(lambda new_counter_value, old_counter_value: bar(new_counter_value - old_counter_value)) as (shared_counter, lock):
+      with ProcessPoolExecutor() as executor:
+        
+        # queue each year as a separate process
+        futures: list[tuple[int, Future[dict[str, Any]]]] = []
+        for (file_path, year) in consolidated_rasters_list:
+          file_root = os.path.splitext(file_path)[0]
+          # print(f'Summarizing raster within {parcels_shp_path} for {year}...')
+          future =  executor.submit(
+                      summarize_raster,
+                      f'{file_root}.tif',
+                      None,
+                      parcels_shp_path,
+                      id_key,
+                      clipped_parcels_rasters_folder,
+                      # status=status,
+                      # status_prefix=f'[{year}] ',
+                      show_progress_bar=False,
+                      shared_counter=shared_counter,
+                      lock=lock
+                    )
+          # future.add_done_callback(lambda future: print(f'Finished raster within {parcels_shp_path} for {year}'))
+          futures.append((year, future))
+                          
+        # yield the results of the futures in the order they were submitted
+        # (we want to preserve order of features in the output layer)
+        for (year, future) in futures:
+          data = future.result()
+          if data: yield { 'cropland_year': year, 'data': data }
 
 def join_pixel_counts_and_trajectories_to_features(
   parcels_shp_path: geopandas.GeoDataFrame,
