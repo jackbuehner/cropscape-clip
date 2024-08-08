@@ -60,12 +60,18 @@ def clip_raster(raster: DatasetReader | str, clip_shape: GeoDataFrame | str, fea
       # if a geodataframe is provided and feature_indices is provided,
       # create a new GeoDataFrame with only the features specified in
       # feature_indices from the provided GeoDataFrame
-      clip_shp_original = geopandas.GeoDataFrame(
-        [clip_shape.iloc[feature_indices]],
-        crs=clip_shape.crs,
-        geometry=[clip_shape.iloc[feature_indices]['geometry']]
-      )
-      if status: status.console.log(f'{status_prefix}Specified input feature layer features selected')
+      try:
+        clip_shp_original = geopandas.GeoDataFrame(
+          [clip_shape.loc[feature_indices]], # we use loc because we are use the row label (which is marked as the index) instead of row integer index
+          crs=clip_shape.crs,
+          geometry=[clip_shape.loc[feature_indices]['geometry']]
+        )
+        if status: status.console.log(f'{status_prefix}Specified input feature layer features selected')
+        pass
+      except Exception as e:
+        available_indices = clip_shape.index.tolist()
+        raise IndexError(f'One or more of the specified feature indices is out of range (chose {feature_indices}, available ({available_indices}))') from e
+      
     else:
       # otherwise, pass throguh the provided geodataframe
       if status: status.update(f'{status_prefix}Reading input feature layer GeoDataFrame...')
