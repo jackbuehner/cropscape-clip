@@ -56,7 +56,7 @@ def reclassify_raster(input_raster_path: str, output_raster_path: str, remap: Pi
   
     return reclassified
 
-def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapSpecs) -> None:
+def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapSpecs, show_progress_bar: bool = True) -> None:
   '''
   Relcaassify all rasters in the input folder based on the provided remap specification.
   
@@ -84,7 +84,7 @@ def reclassify_rasters(input_folder: str, output_folder: str, remap: PixelRemapS
       files_to_process.append((filename, file_path))
           
   # reclssify and save the rasters to the output folder using multiprocessing
-  with alive_bar(len(files_to_process), title='Reclassifying rasters') as bar, ProcessPoolExecutor() as executor:
+  with alive_bar(len(files_to_process), title='Reclassifying rasters', disable=not show_progress_bar) as bar, ProcessPoolExecutor() as executor:
     futures: list[Future[numpy.typing.NDArray[Any]]] = []
     
     # queue each function to be executed
