@@ -122,21 +122,35 @@ def apply_cdl_data_to_parcels(
   
   # generate trajectory data for each cropland data year and parcel
   trajectories = []
-  with fiona.open(parcels_shp_path) as source:
-    console.log(f'Generating trajectories for each feature within {parcels_shp_path}...')
+  console.log(f'Generating trajectories for each feature within {parcels_shp_path}...')
+  parcels_gdf = geopandas.read_file(parcels_shp_path, engine='pyogrio', use_arrow=True)
+  with alive_bar(len(parcels_gdf), title='Generating trajectories (slow)') as bar:
     
-    for feature in alive_it(source):
-      trajectories.append({
-        id_key: feature['properties'][id_key],
-        'CDL_trajectories': calculate_pixel_trajectories(
-          raster_folder_path=f'{clipped_parcels_rasters_folder}/{feature["properties"]["parcelnumb"]}',
-          reclass_spec=reclass_spec,
-          # output_trajectories_file=f'{clipped_parcels_rasters_folder}/{feature["properties"]["parcelnumb"]}/trajectories.json',
-          temp_folder_path = f'./working/temp/trajectories/{feature["properties"]["parcelnumb"]}',
-          # status=status
-        )
-      })
-      
+    with ProcessPoolExecutor() as executor:
+      futures: list[tuple[Any, Future[dict[str, int]]]] = []
+            
+      for index, feature in parcels_gdf.iterrows():
+        id_value = feature[id_key]
+        parcelnumb = feature['parcelnumb']
+        future = executor.submit(
+                    calculate_pixel_trajectories,
+                    f'{clipped_parcels_rasters_folder}/{parcelnumb}',
+                    reclass_spec,
+                    None, # f'{clipped_parcels_rasters_folder}/{feature["properties"]["parcelnumb"]}/trajectories.json',
+                    f'./working/temp/trajectories/{parcelnumb}',
+                    # status=status
+                  )
+        futures.append((id_value, future))
+        
+      for future in as_completed([future for (id_value, future) in futures]):
+        bar()
+        
+      for (id_value, future) in futures:
+        trajectories.append({
+          id_key: id_value,
+          'CDL_trajectories': future.result()
+        })
+
   console.log('Saving pixel trajectories data for features in {parcels_shp_path}...')  
   
   # save the `tidy_trajectories` list to JSON file
