@@ -1,10 +1,11 @@
 import functools
 import json
+from multiprocessing.managers import SyncManager, ValueProxy
 import os
 import shutil
-from typing import Any
+from typing import Any, Optional
 
-from alive_progress import alive_bar, alive_it
+from alive_progress import alive_bar
 import geopandas
 import numpy
 import rasterio
@@ -16,7 +17,7 @@ from clip_raster import clip_raster
 
 console = rich.console.Console()
 
-def summarize_raster(input_raster_path: str, summary_output_path: str | None = None, feature_layer_path: str | None = None, id_key: str | None = None, breakdown_output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '', show_progress_bar: bool = False) -> dict[str, Any]:
+def summarize_raster(input_raster_path: str, summary_output_path: str | None = None, feature_layer_path: str | None = None, id_key: str | None = None, breakdown_output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '', show_progress_bar: bool = False, shared_counter: Optional[ValueProxy[int]] = None, lock: Optional[SyncManager.Lock] = None) -> dict[str, Any]:
   '''
   Generate summary metadata for an input raster.
   - pixel counts for each class
@@ -58,7 +59,7 @@ def summarize_raster(input_raster_path: str, summary_output_path: str | None = N
   if status: status.console.log(f'{status_prefix}Raster pixels parsed')
   
   if feature_layer_path and id_key:
-    breakdown_metadata = process_feature_layer(raster, feature_layer_path, id_key, breakdown_output_folder_path, status=status, status_prefix=status_prefix, show_progress_bar=show_progress_bar)
+    breakdown_metadata = process_feature_layer(raster, feature_layer_path, id_key, breakdown_output_folder_path, status=status, status_prefix=status_prefix, show_progress_bar=show_progress_bar, shared_counter=shared_counter, lock=lock)
   else:
     breakdown_metadata = None
   
@@ -91,9 +92,9 @@ def read_feature_layer(feature_layer_path: str) -> geopandas.GeoDataFrame:
   Open a feature layer from file path and return it as a GeoDataFrame.
   This function's result is cached to prevent multiple reads of the same file.
   '''
-  return geopandas.read_file(feature_layer_path)
+  return geopandas.read_file(feature_layer_path, engine='pyogrio', use_arrow=True)
   
-def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key: str, output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '', show_progress_bar: bool = False) -> list[dict[str, Any]]:
+def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key: str, output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '', show_progress_bar: bool = False, shared_counter: Optional[ValueProxy[int]] = None, lock: Optional[SyncManager.Lock] = None) -> list[dict[str, Any]]:
   raster_root, raster_ext = os.path.splitext(raster.name)
   raster_name = os.path.basename(raster_root)
   feature_layer_root, feature_layer_ext = os.path.splitext(feature_layer_path)
@@ -122,37 +123,38 @@ def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key
         os.makedirs(output_folder)
         if status: status.console.log(f'{loop_status_prefix}Folder {output_folder} created')
       
-      # clip, process, and save
+      # clip raster
       out_image, out_transform, out_meta, out_colormap = clip_raster(raster, feature_layer, index, status=status, status_prefix=loop_status_prefix)
-      with rasterio.open(output_raster_file, "w", **out_meta) as dest:
-        # get the clipped band 1
-        clipped_band1 = out_image[0]
-
-        # count the number of pixels for each class in the clipped band
-        if status: status.update(f'{loop_status_prefix}Parsing raster pixels...')
-        clipped_pixel_classes, clipped_pixel_counts = numpy.unique(clipped_band1, return_counts=True)
-        clipped_pixel_class_counts = dict(zip(clipped_pixel_classes.tolist(), clipped_pixel_counts.tolist()))
-        if status: status.console.log(f'{loop_status_prefix}Raster pixels parsed')
-
-        # generate metadata for the feature
-        feature_metadata = {
-          # 'ID': row['ID'],
-          # 'Area': row['Area'],
-          'id': id,
-          'total_pixels': int(numpy.sum(clipped_pixel_counts)),
-          'pixel_counts': clipped_pixel_class_counts
-        }
-        
-        # save the feature metadata to json
-        if status: status.update(f'{loop_status_prefix}Saving metadata...')
-        breakdowns.append(feature_metadata)
-        if output_folder_path is not None:
-          with open(output_json_file, "w") as file:
-            json.dump(feature_metadata, file, indent=2) 
-            if status: status.console.log(f'{loop_status_prefix}Metadata saved to {output_json_file}')
-        
-        # write the image
-        if output_folder_path is not None:
+      
+      # get the clipped band 1
+      clipped_band1 = out_image[0]
+      
+      # count the number of pixels for each class in the clipped band
+      if status: status.update(f'{loop_status_prefix}Parsing raster pixels...')
+      clipped_pixel_classes, clipped_pixel_counts = numpy.unique(clipped_band1, return_counts=True)
+      clipped_pixel_class_counts = dict(zip(clipped_pixel_classes.tolist(), clipped_pixel_counts.tolist()))
+      if status: status.console.log(f'{loop_status_prefix}Raster pixels parsed')
+      
+      # generate metadata for the feature
+      feature_metadata = {
+        # 'ID': row['ID'],
+        # 'Area': row['Area'],
+        'id': id,
+        'total_pixels': int(numpy.sum(clipped_pixel_counts)),
+        'pixel_counts': clipped_pixel_class_counts
+      }
+      
+      # save the feature metadata to json
+      if status: status.update(f'{loop_status_prefix}Saving metadata...')
+      breakdowns.append(feature_metadata)
+      if output_folder_path is not None:
+        with open(output_json_file, "w") as file:
+          json.dump(feature_metadata, file, indent=2) 
+          if status: status.console.log(f'{loop_status_prefix}Metadata saved to {output_json_file}')
+      
+      # write the image
+      if output_folder_path is not None:
+        with rasterio.open(output_raster_file, "w", **out_meta) as dest:
           if status: status.update(f'{loop_status_prefix}Writing clipped raster...')
           dest.write(out_image[0], 1)
           dest.write_colormap(1, out_colormap)
@@ -165,6 +167,8 @@ def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key
         if status: status.console.log(f'{loop_status_prefix}Temp folder {output_folder} deleted')
         
       bar()
+      if lock and shared_counter:
+        with lock: shared_counter.value += 1
   
   # clean up main temp folder
   if output_folder_path is None:

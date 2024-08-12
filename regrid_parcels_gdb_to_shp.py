@@ -1,15 +1,13 @@
 import os
-import time
 
 import fiona
-import geopandas
-import pandas
-from alive_progress import alive_it
+import gdaltools
+from alive_progress import alive_bar, alive_it
 
 
-def regrid_parcels_gdb_to_shp(geodatabases_folder_path: str, output_shp_folder_path: str, *, columns_to_parse: list[str] = ['parcelnumb_no_formatting', 'lat', 'lon']) -> str: 
+def geodatabases_to_geopackage(geodatabases_folder_path: str, output_gpkg_path: str, *, columns_to_parse: list[str] = ['parcelnumb_no_formatting', 'lat', 'lon']) -> str: 
   """
-  Converts regrid parcel data from geodatabases to shapefiles. This may take a while to run.
+  Converts regrid parcel data from multiple single-layer geodatabases to one multi-layer geopackage. This may take a while to run.
   
   Args:
     geodatabases_folder_path (str): The path to the folder containing the geodatabases. Nothing else should exist in this folder.
@@ -20,66 +18,39 @@ def regrid_parcels_gdb_to_shp(geodatabases_folder_path: str, output_shp_folder_p
     str: The path to the combined shapefile containing all the parcels.
   """
   
-  start_time = time.time()
-  
+  # error if the output file does not end with .gpkg
+  if not output_gpkg_path.endswith('.gpkg'):
+    raise ValueError('The output file path must end with .gpkg')
+    
   # make the output folder if it does not exist
-  if (not os.path.isdir(output_shp_folder_path)): 
-    os.makedirs(output_shp_folder_path)
+  output_folder_path = os.path.dirname(output_gpkg_path)
+  if (not os.path.isdir(output_folder_path)): 
+    os.makedirs(output_folder_path)
   
   geodatabase_paths = [f'{geodatabases_folder_path}/{name}' for name in os.listdir(geodatabases_folder_path) if name.endswith('.gdb')]
   geodatabase_paths_length = len(geodatabase_paths)
   print(f'Found {geodatabase_paths_length} geodatabase files in {geodatabases_folder_path}')
   
-  geodataframes = []
-  for index, geodatabase_path in enumerate(geodatabase_paths):
+  # determine the target crs
+  layer_info = str(gdaltools.ogrinfo(geodatabase_paths[0], fiona.listlayers(geodatabase_paths[0])[0], summary=True, fields=False))
+  epsg_index = layer_info.index('ID["EPSG"')
+  srs = layer_info[epsg_index+4:epsg_index+14].replace('",', ':')
+    
+  # create the combined geopackage
+  for index, geodatabase_path in enumerate(alive_it(geodatabase_paths, title='Merging geodatabases')):
     layer_name = fiona.listlayers(geodatabase_path)[0]
-    gdf = geodataframe_from_geodatabase(geodatabase_path, layer_name, columns_to_parse, status_suffix=f' ({index + 1}/{len(geodatabase_paths)})')
-    geodataframes.append(gdf)
-    gdf.to_file(f'{output_shp_folder_path}/{layer_name}.shp')
     
-  output_combined_shapefile_path = f'{output_shp_folder_path}/parcels.shp'
-  geopandas.GeoDataFrame(pandas.concat(geodataframes)).to_file(output_combined_shapefile_path)
-  
-  end_time = time.time()
-  print(f'total time: {end_time - start_time} seconds ({(end_time - start_time) / 60} minutes)')
-  
-  return output_combined_shapefile_path
-
-
-def geodataframe_from_geodatabase(geodatabase_path: str, layer_name: str, columns: list[str], *, status_prefix: str = '', status_suffix: str = '') -> geopandas.GeoDataFrame:
-  """
-  This function reads a layer from a geodatabase and returns a GeoDataFrame.
-
-  Args:
-    geodatabase_path (str): The path to the geodatabase file.
-    layer_name (str): The name of the layer to read from the geodatabase.
-    columns (list): A list of column names to read from the layer.
-
-  Returns:
-    geopandas.GeoDataFrame: A GeoDataFrame containing the data from the layer.
-  """
-  print(f'{status_prefix}Processing {geodatabase_path.split("/")[-1]}/{layer_name}{status_suffix}...')
-  
-  crs = ''
-  with fiona.open(geodatabase_path, layer=layer_name) as source:
-    crs = source.crs
+    ogr = gdaltools.ogr2ogr()
+    ogr.set_encoding("UTF-8")
+    if index > 0: ogr.set_output_mode('AP', 'UP') # append mode for all but the first geodatabase
     
-  def records():
-    with fiona.open(geodatabase_path, layer=layer_name) as source:      
-      for feature in alive_it(source, title=f'Reading features'):
-        
-        # create a copy of the feature with only the id and geometry
-        f = { k: feature[k] for k in ['id', 'geometry'] }
-        
-        # if columns is provided, only added those columns to the properties
-        # otherwise, add all columns
-        if columns:
-          f['properties'] = { k: feature['properties'][k] for k in columns }
-        else:
-          f['properties'] = feature['properties']
-        
-        # yield instead of return since we are in a generator
-        # and we want the result to continue to be a generator
-        yield f
+    ogr.set_input(geodatabase_path, layer_name)
+    ogr.set_output(output_gpkg_path, 'GPKG', layer_name, srs)
+    
+    # limit the attribute table columns to only the ones we want
+    # to increase processing speeds
+    ogr.set_sql(f'SELECT {", ".join(columns_to_parse)} FROM {layer_name}') 
+  
+    ogr.execute()
       
-  return geopandas.GeoDataFrame.from_features(records(), crs=crs)
+  return output_gpkg_path
