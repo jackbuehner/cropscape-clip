@@ -1,6 +1,7 @@
 .venv/
 input/
 output/
+logging/
 working/
 __pycache__/
 .mypy_cache/

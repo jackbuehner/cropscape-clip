@@ -13,7 +13,7 @@ from shapely.geometry import shape
 from multiprocess_counter import multiprocess_counter
 
 
-def filter_spatial_within(input_layer_path: str, filter_layer_path: str, output_layer_path: str, *, invert: bool = False) -> None:
+def filter_spatial_within(input_layer_path: str, filter_layer_path: str, output_layer_path: str, *, invert: bool = False, loop_print: str = '') -> None:
   """
   Filters features from an input layer that are spatially within any feature of a filter layer.
   
@@ -56,7 +56,8 @@ def filter_spatial_within(input_layer_path: str, filter_layer_path: str, output_
   if input_layer_path.endswith('.gpkg'):
     layer_names = sorted(fiona.listlayers(input_layer_path))
     for index, layer_name in enumerate(layer_names):
-       process_layer(input_layer_path, filter_layer_path, output_layer_path, invert=invert, layer_name=layer_name, current=index + 1, total=len(layer_names))
+      if loop_print: print(loop_print.format(chunk_name=layer_name, count=index + 1, total=len(layer_names)))
+      process_layer(input_layer_path, filter_layer_path, output_layer_path, invert=invert, layer_name=layer_name, current=index + 1, total=len(layer_names))
   
   # otherwise, directly process the input shapefile layer
   else:
@@ -99,6 +100,10 @@ def process_layer(input_layer_path: str, filter_layer_path: str, output_layer_pa
             complete_batches += 1
             # print(f'completed {complete_batches} out of {len(chunk)} batches')
             None # wait for all futures to complete
+            
+          while bar.current < len(layer):
+            None
+            time.sleep(0.1)
           
       with alive_bar(len(futures), title='Compiling chunks', monitor=monitor) as bar:          
         # yield the results of the futures in the order they were submitted

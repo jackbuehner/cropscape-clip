@@ -130,7 +130,7 @@ def apply_cdl_data_to_parcels(
   
   # save the merged data to a geopackage
   with alive_bar(title=f'Saving parcels with CDL counts to geopackage {parcels_gpkg_output_path}', monitor=False):
-    merged_with_summaries_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL counts', driver='GPKG')
+    merged_with_summaries_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL counts', driver='GPKG', append=True)
   
   print(f'Elapsed time: {time.time() - start_time} seconds ({(time.time() - start_time) / 60} minutes)')
   
@@ -193,7 +193,7 @@ def apply_cdl_data_to_parcels(
   )
   
   # save the merged data to a geopackage
-  merged_with_trajectories_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL pixel trajectories', driver='GPKG')
+  merged_with_trajectories_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL pixel trajectories', driver='GPKG', append=True)
   
   end_time = time.time()
   print(f'Elapsed time: {end_time - start_time} seconds ({(end_time - start_time) / 60} minutes)')
@@ -246,6 +246,11 @@ def generate_summary_data(
         # yield the results of the futures in the order they were submitted
         # (we want to preserve order of features in the output layer)
         for (year, future) in futures:
+          exception = future.exception()
+          if exception:
+            print(f'Error processing {year}: {exception}')
+            raise exception
+          
           data = future.result()
           if data: yield { 'cropland_year': year, 'data': data }
 
