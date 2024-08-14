@@ -88,7 +88,7 @@ if __name__ == '__main__':
         # read the feature layer from the geodatabase
         with alive_bar(title='Reading feature layer from geodatabase', monitor=False) as bar:
           gdb_name = os.path.basename(args.gdb_path)
-          gdf = geopandas.read_file(args.gdb_path, layer=args.layer_name, engine='pyogrio', use_arrow=True)
+          gdf = geopandas.read_file(args.gdb_path, layer=args.layer_name, engine='pyogrio', use_arrow=True, columns=[args.id_key, 'lat', 'lon'])
           
         # split the feature layer into chunks
         with alive_bar(title='Chunking feature layer', total=math.ceil(len(gdf) / int(args.chunk_size))) as bar:
