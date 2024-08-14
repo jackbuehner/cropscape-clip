@@ -79,7 +79,10 @@ if __name__ == '__main__':
         
         # remove working and ouput folders/paths if they exist
         if (os.path.isdir('./working')): shutil.rmtree('./working')
-        if (os.path.isdir(args.summary_output_folder_path)): shutil.rmtree(args.summary_output_folder_path)
+        if (os.path.isdir(args.summary_output_folder_path)):
+          for item in os.listdir(args.summary_output_folder_path):
+            if (os.path.isfile(os.path.join(args.summary_output_folder_path, item))): os.remove(os.path.join(args.summary_output_folder_path, item))
+            else: shutil.rmtree(os.path.join(args.summary_output_folder_path, item))
         if (os.path.exists(args.output_gpkg)): os.remove(args.output_gpkg)
               
         # read the feature layer from the geodatabase
