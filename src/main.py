@@ -49,6 +49,9 @@ if __name__ == '__main__':
   parser.add_argument('--cdls_aoi_shp_path', type=str, help="Path to a shapefile specifying the area of interest for the Cropland Data Layers. They will be cropped to the extent of this shapefile.")
   parser.add_argument('--invert-filter', type=bool, help="Invert the filter condition.")
   parser.add_argument('--summary_output_folder_path', type=str, default='./output', help="Folder to save the summary data.")
+  parser.add_argument('--skip_remove_io', type=bool, help="Skip removing the input/output folders.")
+  parser.add_argument('--skip_processing', type=bool, help="Skip processing the feature layer.")
+  parser.add_argument('--skip_merge', type=bool, help="Skip merging the feature layers.")
 
   args = parser.parse_args()
     
@@ -85,104 +88,121 @@ if __name__ == '__main__':
         print(f'\n{"─" * max_cols}\nChunking {args.layer_name} in {args.gdb_path} into {args.chunk_size}-feature chunks...')
         
         # remove working and ouput folders/paths if they exist
-        if (os.path.isdir('./working')): shutil.rmtree('./working')
-        if (os.path.isdir(args.summary_output_folder_path)):
-          for item in os.listdir(args.summary_output_folder_path):
-            if (os.path.isfile(os.path.join(args.summary_output_folder_path, item))): os.remove(os.path.join(args.summary_output_folder_path, item))
-            else: shutil.rmtree(os.path.join(args.summary_output_folder_path, item))
-        if (os.path.exists(args.output_gpkg)): os.remove(args.output_gpkg)
+        if not args.skip_remove_io:
+          if (os.path.isdir('./working')): shutil.rmtree('./working')
+          if (os.path.isdir(args.summary_output_folder_path)):
+            for item in os.listdir(args.summary_output_folder_path):
+              if (os.path.isfile(os.path.join(args.summary_output_folder_path, item))): os.remove(os.path.join(args.summary_output_folder_path, item))
+              else: shutil.rmtree(os.path.join(args.summary_output_folder_path, item))
+          if (os.path.exists(args.output_gpkg)): os.remove(args.output_gpkg)
+        
+        if not args.skip_processing:
+          # read the feature layer from the geodatabase
+          with alive_bar(title='Reading feature layer from geodatabase', monitor=False) as bar:
+            gdb_name = os.path.basename(args.gdb_path)
+            gdf = geopandas.read_file(args.gdb_path, layer=args.layer_name, engine='pyogrio', use_arrow=True, columns=[args.id_key, 'lat', 'lon'])
+            gdf = gdf.rename(columns={ args.id_key: args.id_key[0:10] })
+
+          # split the feature layer into chunks
+          with alive_bar(title='Chunking feature layer', total=math.ceil(len(gdf) / int(args.chunk_size))) as bar:
+            chunks = []
+            for i in range(0, len(gdf), args.chunk_size):
+              chunks.append(gdf.iloc[i:i + args.chunk_size])
+              bar()
               
-        # read the feature layer from the geodatabase
-        with alive_bar(title='Reading feature layer from geodatabase', monitor=False) as bar:
-          gdb_name = os.path.basename(args.gdb_path)
-          gdf = geopandas.read_file(args.gdb_path, layer=args.layer_name, engine='pyogrio', use_arrow=True, columns=[args.id_key, 'lat', 'lon'])
-          
-        # split the feature layer into chunks
-        with alive_bar(title='Chunking feature layer', total=math.ceil(len(gdf) / int(args.chunk_size))) as bar:
-          chunks = []
-          for i in range(0, len(gdf), args.chunk_size):
-            chunks.append(gdf.iloc[i:i + args.chunk_size])
-            bar()
-              
-        # save each chunk into a different layer in the GeoPackage
-        with alive_bar(title='Saving chunks to GeoPackage', total=len(chunks)) as bar:
-          chunked_gpkg_path = f'./working/{gdb_name}/{args.layer_name}__chunked.gpkg'
-          filtered_chunked_gpkg_path = f'./working/{gdb_name}/{args.layer_name}__chunked__filtered.gpkg'
-          
-          # create the folder for the GeoPackage
-          if (not os.path.isdir(os.path.dirname(chunked_gpkg_path))):
-            os.makedirs(os.path.dirname(chunked_gpkg_path))
-          
           # save each chunk into a different layer in the GeoPackage
-          for i, chunk in enumerate(chunks):
-            layer_chunk = f'layer_{i + 1}'
-            chunk.to_file(chunked_gpkg_path, layer=layer_chunk, driver='GPKG', append=True)
-            bar()
-                      
-        # create a new geopackage without urban area parcels
-        if (args.filter_layer_path):
-          filter_spatial_within(
-            input_layer_path=chunked_gpkg_path,
-            filter_layer_path=args.filter_layer_path,
-            output_layer_path=filtered_chunked_gpkg_path,
-            invert=args.invert_filter,
-            loop_print='\n' + '─' * max_cols + '\nFiltering (spatial within) for chunk "{chunk_name}" ({count}/{total})...'
-          )
-                
-        # create a list of the chunked layers by reading the GeoPackage
-        gpkg_path = filtered_chunked_gpkg_path if args.filter_layer_path else chunked_gpkg_path
-        chunk_names = fiona.listlayers(gpkg_path)
+          with alive_bar(title='Saving chunks to GeoPackage', total=len(chunks)) as bar:
+            chunked_gpkg_path = f'./working/{gdb_name}/{args.layer_name}__chunked.gpkg'
+            filtered_chunked_gpkg_path = f'./working/{gdb_name}/{args.layer_name}__chunked__filtered.gpkg'
+            
+            # create the folder for the GeoPackage
+            if (not os.path.isdir(os.path.dirname(chunked_gpkg_path))):
+              os.makedirs(os.path.dirname(chunked_gpkg_path))
+            
+            # save each chunk into a different layer in the GeoPackage
+            for i, chunk in enumerate(chunks):
+              layer_chunk = f'layer_{i + 1}'
+              chunk.to_file(chunked_gpkg_path, layer=layer_chunk, driver='GPKG', append=True)
+              bar()
+                        
+          # create a new geopackage without urban area parcels
+          if (args.filter_layer_path):
+            filter_spatial_within(
+              input_layer_path=chunked_gpkg_path,
+              filter_layer_path=args.filter_layer_path,
+              output_layer_path=filtered_chunked_gpkg_path,
+              invert=args.invert_filter,
+              loop_print='\n' + '─' * max_cols + '\nFiltering (spatial within) for chunk "{chunk_name}" ({count}/{total})...'
+            )
+                  
+          # create a list of the chunked layers by reading the GeoPackage
+          gpkg_path = filtered_chunked_gpkg_path if args.filter_layer_path else chunked_gpkg_path
+          chunk_names = fiona.listlayers(gpkg_path)
+          
+          # create temporary shapefile versions of each chunk since `apply_cdl_data_to_parcels` requires shapefiles
+          print(f'\n{"─" * max_cols}')
+          with alive_bar(len(chunk_names), title='Saving chunks to shapefiles') as bar:
+            for chunk_name in chunk_names:
+              chunk_gdf = geopandas.read_file(gpkg_path, layer=chunk_name, engine='pyogrio', use_arrow=True)
+              chunk_gdf.to_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp')
+              bar()
+          
+          # for each chunk, process the feature layer
+          for index, chunk_name in enumerate(chunk_names):
+            print(f'\n{"─" * max_cols}\nProcessing chunk "{chunk_name}" ({index + 1}/{len(chunk_names)})...')
+            
+            apply_cdl_data_to_parcels(
+              cropscape_input_folder=args.cdls_folder_path, # folder containing cropland data layer rasters folders
+              area_of_interest_shapefile=args.cdls_aoi_shp_path, # shapefile defining area of interest
+              clipped_rasters_folder='./working/clipped', # folder for rasters clipped to area of interest
+              consolidated_rasters_folder='./working/consolidated', # folder for consolidated cropland data layer rasters
+              reclass_spec=reclass_spec,
+              parcels_shp_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp',
+              id_key=args.id_key[:10],
+              parcels_summary_file=f'{args.summary_output_folder_path}/{chunk_name}__summary_data.json',
+              clipped_parcels_rasters_folder='./working/clipped_parcels_rasters',
+              parcels_trajectories_file=f'{args.summary_output_folder_path}/{chunk_name}__trajectories.json',
+              parcels_gpkg_output_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg',
+              skip_raster_clipping_and_reclassifying=index > 0
+            )
         
-        # create temporary shapefile versions of each chunk since `apply_cdl_data_to_parcels` requires shapefiles
-        print(f'\n{"─" * max_cols}')
-        with alive_bar(len(chunk_names), title='Saving chunks to shapefiles') as bar:
-          for chunk_name in chunk_names:
-            chunk_gdf = geopandas.read_file(gpkg_path, layer=chunk_name, engine='pyogrio', use_arrow=True)
-            chunk_gdf.to_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp')
+        if not args.skip_merge:
+          print(f'\n{"─" * max_cols}\nMerging chunked layers into "{args.output_gpkg}"...')
+
+          # if chunk_names is not available, manually recreate it
+          # by estimating names based on the number of chunks in ./working/{gdb_name}
+          # (valid chunks end with '__output.gpkg')
+          if args.skip_processing:
+            gdb_name = os.path.basename(args.gdb_path)
+            for item in os.listdir(f'./working/{gdb_name}'):
+              chunk_names = []
+              if item.endswith('__output.gpkg'):
+                chunk_name = item.split('__')[1].replace('__output.gpkg', '')
+                chunk_names.append(chunk_name)
+                break
+
+          # merge all the chunked layers into a single layer
+          merged_counts_gdf = geopandas.GeoDataFrame()
+          merged_trajectories_gdf = geopandas.GeoDataFrame()
+          with alive_bar(2 * len(chunk_names), title='Merging chunked layers') as bar:
+            for chunk_name in chunk_names:
+              chunk_counts_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL counts', engine='pyogrio', use_arrow=True)
+              merged_counts_gdf = pandas.concat([merged_counts_gdf, chunk_counts_gdf], ignore_index=True)
+              bar()
+              chunk_trajectories_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL pixel trajectories', engine='pyogrio', use_arrow=True)
+              merged_trajectories_gdf = pandas.concat([merged_trajectories_gdf, chunk_trajectories_gdf], ignore_index=True)
+              bar()
+            
+          # save merged layers to the output GeoPackage
+          with alive_bar(2, title='Saving merged layers', monitor=False) as bar:
+            merged_counts_gdf.to_file(args.output_gpkg, layer='Parcels with CDL counts', driver='GPKG')
             bar()
-        
-        # for each chunk, process the feature layer
-        for index, chunk_name in enumerate(chunk_names):
-          print(f'\n{"─" * max_cols}\nProcessing chunk "{chunk_name}" ({index + 1}/{len(chunk_names)})...')
-          
-          
-          apply_cdl_data_to_parcels(
-            cropscape_input_folder=args.cdls_folder_path, # folder containing cropland data layer rasters folders
-            area_of_interest_shapefile=args.cdls_aoi_shp_path, # shapefile defining area of interest
-            clipped_rasters_folder='./working/clipped', # folder for rasters clipped to area of interest
-            consolidated_rasters_folder='./working/consolidated', # folder for consolidated cropland data layer rasters
-            reclass_spec=reclass_spec,
-            parcels_shp_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp',
-            id_key=args.id_key[:10],
-            parcels_summary_file=f'{args.summary_output_folder_path}/{chunk_name}__summary_data.json',
-            clipped_parcels_rasters_folder='./working/clipped_parcels_rasters',
-            parcels_trajectories_file=f'{args.summary_output_folder_path}/{chunk_name}__trajectories.json',
-            parcels_gpkg_output_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg',
-            skip_raster_clipping_and_reclassifying=index > 0
-          )
-          #args.output_gpkg
-        
-        # merge all the chunked layers into a single layer
-        merged_counts_gdf = geopandas.GeoDataFrame()
-        merged_trajectories_gdf = geopandas.GeoDataFrame()
-        with alive_bar(2 * len(chunk_names), title='Merging chunked layers') as bar:
-          for chunk_name in chunk_names:
-            chunk_counts_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL counts', engine='pyogrio', use_arrow=True)
-            merged_counts_gdf = pandas.concat([merged_counts_gdf, chunk_counts_gdf], ignore_index=True)
+            merged_trajectories_gdf.to_file(args.output_gpkg, layer='Parcels with CDL pixel trajectories', driver='GPKG')
             bar()
-            chunk_trajectories_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL pixel trajectories', engine='pyogrio', use_arrow=True)
-            merged_trajectories_gdf = pandas.concat([merged_trajectories_gdf, chunk_trajectories_gdf], ignore_index=True)
-            bar()
-          
-        # save merged layers to the output GeoPackage
-        with alive_bar(2, title='Saving merged layers', monitor=False) as bar:
-          merged_counts_gdf.to_file(args.output_gpkg, layer='Parcels with CDL counts', driver='GPKG')
-          bar()
-          merged_trajectories_gdf.to_file(args.output_gpkg, layer='Parcels with CDL pixel trajectories', driver='GPKG')
-          bar()
-          
-        print('DONE')
-        print(f'Total elapsed time: {time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))}')
+
+        print(f'\n{"─" * max_cols}\nDONE')
+        print(f'  Total elapsed time: {time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))}')
+        print(f'  Output saved to {args.output_gpkg}')
 
       except Exception as err:
         print(f'\n\n{err}\n' + ''.join(traceback.format_tb(err.__traceback__)))
