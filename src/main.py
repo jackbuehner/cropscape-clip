@@ -1,4 +1,5 @@
 import argparse
+import io
 import math
 import os
 import shutil
@@ -16,6 +17,27 @@ from apply_cdl_data_to_parcels import apply_cdl_data_to_parcels
 from filter_spatial_within import filter_spatial_within
 from reclassify_raster import PixelRemapSpecs
 from regrid_parcels_gdb_to_shp import geodatabases_to_geopackage
+
+class DualStream(io.StringIO):
+  def __init__(self, file):
+    super().__init__()
+    self.file = file
+    self.terminal = sys.stdout
+    self.is_in_docker_image = os.path.exists('/.dockerenv')
+
+  def write(self, message):
+    super().write(message)  # Write to in-memory buffer
+    if self.is_in_docker_image:
+      self.terminal.write(message)  # Write to terminal
+      self.terminal.flush()  # Flush terminal immediately
+    self.file.write(message)  # Write to file
+    self.file.flush()  # Flush file immediately
+
+  def flush(self):
+    super().flush()  # Flush the in-memory buffer
+    self.terminal.flush()  # Flush terminal buffer
+    self.file.flush()  # Flush file buffer
+
 
 reclass_spec: PixelRemapSpecs = {
   254: { 'color': (0, 0, 0), 'name': 'background', 'original': [0] }, # we cannot have 0
@@ -67,10 +89,10 @@ if __name__ == '__main__':
     print(f'│                                                     {" " * len(output_logfile)} │')
     print(f'│ Run \033[93;1mtail -F {output_logfile}\033[0m in a separate terminal to view progress │')
     print(f'│                                                     {" " * len(output_logfile)} │')
-    print(f'│ {" " * hp}                 \033[93;2mCTRL + C\033[0m\033[2m to cancel\033[0m                 {" " * hp} │')
+    print(f'│ {" " * hp}                 \033[93;2mCTRL + C\033[0m\033[2m to cancel\033[0m                  {" " * hp} │')
     print(f'└─────────────────────────────────────────────────────{"─" * len(output_logfile)}─┘')
     # print(f'Run \033[93;1mtail -F {output_logfile}' + " 2>&1 | perl -ne 'if (/file truncated/) {system 'clear'} else {print}'} | grep " + '"ERROR"' + "\033[0m in a separate terminal to view progress (clear when restarted)")
-    with redirect_stdout(logfile):
+    with redirect_stdout(DualStream(logfile)):
       try:
         max_cols = 120
         config_handler.set_global(force_tty=True, max_cols=max_cols)
