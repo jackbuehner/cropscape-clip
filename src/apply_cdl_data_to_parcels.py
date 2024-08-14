@@ -33,7 +33,9 @@ def apply_cdl_data_to_parcels(
   parcels_trajectories_file: str,
   parcels_gpkg_output_path: str,
   *,
-  skip_raster_clipping_and_reclassifying: bool = False
+  skip_raster_clipping_and_reclassifying: bool = False,
+  skip_summary_data: bool = False,
+  skip_trajectories: bool = False,
 ) -> None:
   """
   Executes the main workflow for processing cropscape data and generating summary and trajectory data for parcels.
@@ -74,132 +76,134 @@ def apply_cdl_data_to_parcels(
     reclassify_rasters(clipped_rasters_folder, consolidated_rasters_folder, reclass_spec)
     # console.log('Cropland classess consolidated')
 
-  # create a list containing the paths to all consilidated rasters
-  # so we can easily loop through them later
-  consolidated_rasters_list = sorted([(f'{consolidated_rasters_folder}/{str}', int(str[0:4])) for str in os.listdir(consolidated_rasters_folder) if str.endswith("_30m_cdls.tif")], key=lambda x: x[1])
+  if not skip_summary_data:
+    # create a list containing the paths to all consilidated rasters
+    # so we can easily loop through them later
+    consolidated_rasters_list = sorted([(f'{consolidated_rasters_folder}/{str}', int(str[0:4])) for str in os.listdir(consolidated_rasters_folder) if str.endswith("_30m_cdls.tif")], key=lambda x: x[1])
 
-  # generate summary data for each cropland data year and parcel
-  # and store it in the `summary_data` list
-  status.update('Generating summary data for each cropland data year...')
-  status.stop()
-  reordered_consolidated_rasters_list = consolidated_rasters_list[0:1] + consolidated_rasters_list[-1:] + consolidated_rasters_list[1:-1]
-  summary_data =  list(
-                    generate_summary_data(
-                      reordered_consolidated_rasters_list,
-                      parcels_shp_path,
-                      clipped_parcels_rasters_folder,
-                      id_key,
-                      status=status,
+    # generate summary data for each cropland data year and parcel
+    # and store it in the `summary_data` list
+    status.update('Generating summary data for each cropland data year...')
+    status.stop()
+    reordered_consolidated_rasters_list = consolidated_rasters_list[0:1] + consolidated_rasters_list[-1:] + consolidated_rasters_list[1:-1]
+    summary_data =  list(
+                      generate_summary_data(
+                        reordered_consolidated_rasters_list,
+                        parcels_shp_path,
+                        clipped_parcels_rasters_folder,
+                        id_key,
+                        status=status,
+                      )
                     )
-                  )
-  
     
-  # console.log('Saving summary data for rasters within all input features...')
-  
-  # save the `summary_data` list to JSON file
-  summary_data_folder_path = os.path.dirname(parcels_summary_file)
-  parcels_summary_file_root = os.path.splitext(parcels_summary_file)[0]
-  if (not os.path.isdir(summary_data_folder_path)): 
-    os.makedirs(summary_data_folder_path)
-  with open(f'{parcels_summary_file_root}.json', "w") as file:
-    with alive_bar(title='Saving summary data JSON', monitor=False):
-      json.dump(summary_data, file, indent=2) 
-
-  # create tidy data from the summary data
-  tidy = []
-  for entry in alive_it(summary_data, title="Creating tidy data"):
-    year = entry['cropland_year']
-    breakdowns = entry['data']['breakdown']
-    breakdowns_with_year = [{'cropland_year': year, **breakdown} for breakdown in breakdowns]
-    tidy += breakdowns_with_year
-  with alive_bar(title='Creating data frame', monitor=False):
-    tidy_df = pandas.json_normalize(tidy)
-    # ensure id is a string
-    tidy_df['id'] = tidy_df['id'].astype(str)
-    # console.log(f'Summary data saved to {parcels_summary_file_root}.json')
-  
-  # save the `summary_data` list to tidy CSV file
-  with alive_bar(title='Saving tidy data CSV', monitor=False):
-    tidy_df.to_csv(f'{parcels_summary_file_root}.csv', index=False)
-    # console.log(f'Tidy summary data saved to {parcels_summary_file_root}.csv')
-    
-  # join summary data to parcels shapefile
-  merged_with_summaries_gdf = join_pixel_counts_to_featurs(
-    parcels_shp_path=parcels_shp_path,
-    tidy_df=tidy_df,
-    reclass_spec=reclass_spec,
-    id_key=id_key
-  )
-  
-  # save the merged data to a geopackage
-  with alive_bar(title=f'Saving parcels with CDL counts to geopackage {parcels_gpkg_output_path}', monitor=False):
-    merged_with_summaries_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL counts', driver='GPKG', append=True)
-  
-  print(f'Elapsed time: {time.time() - start_time} seconds ({(time.time() - start_time) / 60} minutes)')
-  
-  # generate trajectory data for each cropland data year and parcel
-  trajectories = []
-  # console.log(f'Generating trajectories for each feature within {parcels_shp_path}...')
-  parcels_gdf = geopandas.read_file(parcels_shp_path, engine='pyogrio', use_arrow=True)
-  with alive_bar(len(parcels_gdf), title='Generating trajectories (slow)') as bar:
-    
-    with ProcessPoolExecutor(math.floor((cpu_count() - 1) / 2)) as executor:
-      futures: list[tuple[Any, Future[dict[str, int]]]] = []
-            
-      for index, feature in parcels_gdf.iterrows():
-        id_value = feature[id_key]
-        parcelnumb = feature['parcelnumb']
-        future = executor.submit(
-                    calculate_pixel_trajectories,
-                    f'{clipped_parcels_rasters_folder}/{parcelnumb}',
-                    reclass_spec,
-                    None, # f'{clipped_parcels_rasters_folder}/{feature["properties"]["parcelnumb"]}/trajectories.json',
-                    f'./working/temp/trajectories/{parcelnumb}',
-                    # status=status
-                  )
-        futures.append((id_value, future))
-        
-      for future in as_completed([future for (id_value, future) in futures]):
-        bar()
-        
-      for (id_value, future) in futures:
-        trajectories.append({
-          id_key: id_value,
-          'CDL_trajectories': future.result()
-        })
-
-  # console.log('Saving pixel trajectories data for features in {parcels_shp_path}...')  
-  
-  # save the `tidy_trajectories` list to JSON file
-  trajectories_data_folder_path = os.path.dirname(parcels_trajectories_file)
-  parcels_trajectories_file_root = os.path.splitext(parcels_trajectories_file)[0]
-  if (not os.path.isdir(trajectories_data_folder_path)): 
-    os.makedirs(trajectories_data_folder_path)
-  with open(f'{parcels_trajectories_file_root}.json', "w") as file:
-    with alive_bar(title='Saving trajectories data JSON', monitor=False):
-      json.dump(trajectories, file, indent=2) 
-      # console.log(f'Pixel trajectories saved to {parcels_summary_file_root}.json')
-  
-  # save the `tidy_trajectories` list to tidy CSV file
-  with alive_bar(title='Saving trajectories data CSV', monitor=False):
-    trajectories_df = pandas.DataFrame(trajectories)
-    # convert the id to a string with length 13
-    trajectories_df[id_key] = trajectories_df[id_key].apply('{:0>13}'.format)
-    trajectories_df.to_csv(f'{parcels_trajectories_file_root}.csv', index=False)
-    # console.log(f'Tidy pixel trajectories data saved to {parcels_summary_file_root}.csv')
       
-  # join trajectory data to parcels shapefile
-  merged_with_trajectories_gdf = join_pixel_trajectories_to_features(
-    parcels_shp_path=parcels_shp_path,
-    trajectories_df=trajectories_df,
-    id_key=id_key
-  )
-  
-  # save the merged data to a geopackage
-  merged_with_trajectories_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL pixel trajectories', driver='GPKG', append=True)
-  
-  end_time = time.time()
-  print(f'Elapsed time: {end_time - start_time} seconds ({(end_time - start_time) / 60} minutes)')
+    # console.log('Saving summary data for rasters within all input features...')
+    
+    # save the `summary_data` list to JSON file
+    summary_data_folder_path = os.path.dirname(parcels_summary_file)
+    parcels_summary_file_root = os.path.splitext(parcels_summary_file)[0]
+    if (not os.path.isdir(summary_data_folder_path)): 
+      os.makedirs(summary_data_folder_path)
+    with open(f'{parcels_summary_file_root}.json', "w") as file:
+      with alive_bar(title='Saving summary data JSON', monitor=False):
+        json.dump(summary_data, file, indent=2) 
+
+    # create tidy data from the summary data
+    tidy = []
+    for entry in alive_it(summary_data, title="Creating tidy data"):
+      year = entry['cropland_year']
+      breakdowns = entry['data']['breakdown']
+      breakdowns_with_year = [{'cropland_year': year, **breakdown} for breakdown in breakdowns]
+      tidy += breakdowns_with_year
+    with alive_bar(title='Creating data frame', monitor=False):
+      tidy_df = pandas.json_normalize(tidy)
+      # ensure id is a string
+      tidy_df['id'] = tidy_df['id'].astype(str)
+      # console.log(f'Summary data saved to {parcels_summary_file_root}.json')
+    
+    # save the `summary_data` list to tidy CSV file
+    with alive_bar(title='Saving tidy data CSV', monitor=False):
+      tidy_df.to_csv(f'{parcels_summary_file_root}.csv', index=False)
+      # console.log(f'Tidy summary data saved to {parcels_summary_file_root}.csv')
+      
+    # join summary data to parcels shapefile
+    merged_with_summaries_gdf = join_pixel_counts_to_featurs(
+      parcels_shp_path=parcels_shp_path,
+      tidy_df=tidy_df,
+      reclass_spec=reclass_spec,
+      id_key=id_key
+    )
+    
+    # save the merged data to a geopackage
+    with alive_bar(title=f'Saving parcels with CDL counts to geopackage {parcels_gpkg_output_path}', monitor=False):
+      merged_with_summaries_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL counts', driver='GPKG', append=True)
+    
+    print(f'Elapsed time: {time.time() - start_time} seconds ({(time.time() - start_time) / 60} minutes)')
+
+  # generate trajectory data for each cropland data year and parcel
+  if not skip_trajectories:
+    trajectories = []
+    # console.log(f'Generating trajectories for each feature within {parcels_shp_path}...')
+    parcels_gdf = geopandas.read_file(parcels_shp_path, engine='pyogrio', use_arrow=True)
+    with alive_bar(len(parcels_gdf), title='Generating trajectories (slow)') as bar:
+      
+      with ProcessPoolExecutor(math.floor((cpu_count() - 1) / 2)) as executor:
+        futures: list[tuple[Any, Future[dict[str, int]]]] = []
+              
+        for index, feature in parcels_gdf.iterrows():
+          id_value = feature[id_key]
+          parcelnumb = feature['parcelnumb']
+          future = executor.submit(
+                      calculate_pixel_trajectories,
+                      f'{clipped_parcels_rasters_folder}/{parcelnumb}',
+                      reclass_spec,
+                      None, # f'{clipped_parcels_rasters_folder}/{feature["properties"]["parcelnumb"]}/trajectories.json',
+                      f'./working/temp/trajectories/{parcelnumb}',
+                      # status=status
+                    )
+          futures.append((id_value, future))
+          
+        for future in as_completed([future for (id_value, future) in futures]):
+          bar()
+          
+        for (id_value, future) in futures:
+          trajectories.append({
+            id_key: id_value,
+            'CDL_trajectories': future.result()
+          })
+
+    # console.log('Saving pixel trajectories data for features in {parcels_shp_path}...')  
+    
+    # save the `tidy_trajectories` list to JSON file
+    trajectories_data_folder_path = os.path.dirname(parcels_trajectories_file)
+    parcels_trajectories_file_root = os.path.splitext(parcels_trajectories_file)[0]
+    if (not os.path.isdir(trajectories_data_folder_path)): 
+      os.makedirs(trajectories_data_folder_path)
+    with open(f'{parcels_trajectories_file_root}.json', "w") as file:
+      with alive_bar(title='Saving trajectories data JSON', monitor=False):
+        json.dump(trajectories, file, indent=2) 
+        # console.log(f'Pixel trajectories saved to {parcels_summary_file_root}.json')
+    
+    # save the `tidy_trajectories` list to tidy CSV file
+    with alive_bar(title='Saving trajectories data CSV', monitor=False):
+      trajectories_df = pandas.DataFrame(trajectories)
+      # convert the id to a string with length 13
+      trajectories_df[id_key] = trajectories_df[id_key].apply('{:0>13}'.format)
+      trajectories_df.to_csv(f'{parcels_trajectories_file_root}.csv', index=False)
+      # console.log(f'Tidy pixel trajectories data saved to {parcels_summary_file_root}.csv')
+        
+    # join trajectory data to parcels shapefile
+    merged_with_trajectories_gdf = join_pixel_trajectories_to_features(
+      parcels_shp_path=parcels_shp_path,
+      trajectories_df=trajectories_df,
+      id_key=id_key
+    )
+    
+    # save the merged data to a geopackage
+    merged_with_trajectories_gdf.to_file(parcels_gpkg_output_path, layer='Parcels with CDL pixel trajectories', driver='GPKG', append=True)
+    
+    end_time = time.time()
+    print(f'Elapsed time: {end_time - start_time} seconds ({(end_time - start_time) / 60} minutes)')
 
 def generate_summary_data(
   consolidated_rasters_list: list[tuple[str, int]],

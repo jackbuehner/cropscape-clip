@@ -171,7 +171,10 @@ if __name__ == '__main__':
           
           # for each chunk, process the feature layer
           for index, chunk_name in enumerate(chunk_names):
-            print(f'\n{"─" * max_cols}\nProcessing chunk "{chunk_name}" ({index + 1}/{len(chunk_names)})...')
+            print(f'\n{"─" * max_cols}\nProcessing chunk "{chunk_name}" for summaries ({index + 1}/{len(chunk_names)})...')
+
+            parcels_gpkg_output_path=f'{args.summary_output_folder_path}/chunked/{args.layer_name}__{chunk_name}__output.gpkg'
+            os.makedirs(os.path.dirname(parcels_gpkg_output_path), exist_ok=True)
             
             apply_cdl_data_to_parcels(
               cropscape_input_folder=args.cdls_folder_path, # folder containing cropland data layer rasters folders
@@ -181,11 +184,33 @@ if __name__ == '__main__':
               reclass_spec=reclass_spec,
               parcels_shp_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp',
               id_key=args.id_key[:10],
-              parcels_summary_file=f'{args.summary_output_folder_path}/{chunk_name}__summary_data.json',
+              parcels_summary_file=f'{args.summary_output_folder_path}/chunked/{chunk_name}__summary_data.json',
               clipped_parcels_rasters_folder='./working/clipped_parcels_rasters',
-              parcels_trajectories_file=f'{args.summary_output_folder_path}/{chunk_name}__trajectories.json',
-              parcels_gpkg_output_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg',
-              skip_raster_clipping_and_reclassifying=index > 0
+              parcels_trajectories_file=f'{args.summary_output_folder_path}/chunked/{chunk_name}__trajectories.json',
+              parcels_gpkg_output_path=parcels_gpkg_output_path,
+              skip_raster_clipping_and_reclassifying=index > 0,
+              skip_trajectories=True
+            )
+
+          for index, chunk_name in enumerate(chunk_names):
+            print(f'\n{"─" * max_cols}\nProcessing chunk "{chunk_name}" for trajectories ({index + 1}/{len(chunk_names)})...')
+
+            parcels_gpkg_output_path=f'{args.summary_output_folder_path}/chunked/{args.layer_name}__{chunk_name}__output.gpkg'
+            
+            apply_cdl_data_to_parcels(
+              cropscape_input_folder=args.cdls_folder_path, # folder containing cropland data layer rasters folders
+              area_of_interest_shapefile=args.cdls_aoi_shp_path, # shapefile defining area of interest
+              clipped_rasters_folder='./working/clipped', # folder for rasters clipped to area of interest
+              consolidated_rasters_folder='./working/consolidated', # folder for consolidated cropland data layer rasters
+              reclass_spec=reclass_spec,
+              parcels_shp_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp',
+              id_key=args.id_key[:10],
+              parcels_summary_file=f'{args.summary_output_folder_path}/chunked/{chunk_name}__summary_data.json',
+              clipped_parcels_rasters_folder='./working/clipped_parcels_rasters',
+              parcels_trajectories_file=f'{args.summary_output_folder_path}/chunked/{chunk_name}__trajectories.json',
+              parcels_gpkg_output_path=parcels_gpkg_output_path,
+              skip_raster_clipping_and_reclassifying=True,
+              skip_summary_data=True
             )
         
         if not args.skip_merge:
@@ -208,14 +233,25 @@ if __name__ == '__main__':
           merged_trajectories_gdf = geopandas.GeoDataFrame()
           with alive_bar(2 * len(chunk_names), title='Merging chunked layers') as bar:
             for chunk_name in chunk_names:
-              chunk_counts_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL counts', engine='pyogrio', use_arrow=True)
-              chunk_counts_gdf[args.id_key[0:10]] = chunk_counts_gdf[args.id_key[0:10]].astype(str)
-              merged_counts_gdf = pandas.concat([merged_counts_gdf, chunk_counts_gdf], ignore_index=True)
-              bar()
-              chunk_trajectories_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL pixel trajectories', engine='pyogrio', use_arrow=True)
-              chunk_trajectories_gdf[args.id_key[0:10]] = chunk_trajectories_gdf[args.id_key[0:10]].astype(str)
-              merged_trajectories_gdf = pandas.concat([merged_trajectories_gdf, chunk_trajectories_gdf], ignore_index=True)
-              bar()
+              chunk_path = f'{args.summary_output_folder_path}/chunked/{args.layer_name}__{chunk_name}__output.gpkg'
+
+              if (os.path.exists(chunk_path)):
+                try:
+                  chunk_counts_gdf = geopandas.read_file(chunk_path, layer='Parcels with CDL counts', engine='pyogrio', use_arrow=True)
+                  chunk_counts_gdf[args.id_key[0:10]] = chunk_counts_gdf[args.id_key[0:10]].astype(str)
+                  merged_counts_gdf = pandas.concat([merged_counts_gdf, chunk_counts_gdf], ignore_index=True)
+                  bar()
+                except:
+                  print(f'Error reading {chunk_path} layer "Parcels with CDL counts"')
+              
+                try:
+                  chunk_trajectories_gdf = geopandas.read_file(chunk_path, layer='Parcels with CDL pixel trajectories', engine='pyogrio', use_arrow=True)
+                  chunk_trajectories_gdf[args.id_key[0:10]] = chunk_trajectories_gdf[args.id_key[0:10]].astype(str)
+                  merged_trajectories_gdf = pandas.concat([merged_trajectories_gdf, chunk_trajectories_gdf], ignore_index=True)
+                  bar()
+                except:
+                  print(f'Error reading {chunk_path} layer "Parcels with CDL pixel trajectories"')
+                
             
           # save merged layers to the output GeoPackage
           with alive_bar(2, title='Saving merged layers', monitor=False) as bar:
