@@ -43,7 +43,7 @@ if __name__ == '__main__':
   parser.add_argument('--layer_name', required=True, type=str, help="Name of the feature layer.")
   parser.add_argument('--id_key', required=True, type=str, help="Column name of the unique identifier for the parcels. The column name will be truncated to 10 characters. Will be read as a string column. If the value is not unique or it is null, the row's ogs_fid or index will be used.")
   parser.add_argument('--output_gpkg', required=True, type=str, help="Path to the output GeoPackage.")
-  parser.add_argument('--chunk_size', type=int, default=50000, help="Number of features per chunk (default is 1000).")
+  parser.add_argument('--chunk_size', type=int, default=10000, help="Number of features per chunk (default is 1000).")
   parser.add_argument('--filter_layer_path', type=str, help="The file path to a shapefile to filter out features. The filter is a spatial within. Can be inverted with --invert-filter.")
   parser.add_argument('--cdls_folder_path', type=str, help="Path to folder containing the folders for each year of the Cropland Data Layer named with the format 'YYYY_30m_cdls'.")
   parser.add_argument('--cdls_aoi_shp_path', type=str, help="Path to a shapefile specifying the area of interest for the Cropland Data Layers. They will be cropped to the extent of this shapefile.")
