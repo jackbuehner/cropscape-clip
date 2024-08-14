@@ -4,10 +4,13 @@ import os
 import shutil
 import sys
 from contextlib import redirect_stdout
+import time
+import traceback
 
 import fiona
 import geopandas
 from alive_progress import alive_bar, config_handler
+import pandas
 
 from apply_cdl_data_to_parcels import apply_cdl_data_to_parcels
 from filter_spatial_within import filter_spatial_within
@@ -69,9 +72,13 @@ if __name__ == '__main__':
         max_cols = 120
         config_handler.set_global(force_tty=True, max_cols=max_cols)
         config_handler.set_global(title_length=32)
+
+        # print the start time
+        start_time = time.time()
+        print(f'\n\n\n\n\n\n\n\n\n\nStart time:\n  {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))}')
                 
         # print all arguments in args
-        print(f'\n\n\n\n\n\n\n\n\n\nArguments:')
+        print(f'\nArguments:')
         for arg in vars(args):
           print(f'  {arg}: {getattr(args, arg)}')
                 
@@ -175,7 +182,14 @@ if __name__ == '__main__':
           bar()
           
         print('DONE')
+        print(f'Total elapsed time: {time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))}')
 
-      except Exception as e:
-        print(e)
+      except Exception as err:
+        print(f'\n\n{err}\n' + ''.join(traceback.format_tb(err.__traceback__)))
+        print(f'\nERROR:\n{err}\nPlease refer to the stack strace above for more information\n')
+        print(f'Total elapsed time: {time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))}')
         sys.exit(f'There was an error. Please check the log file at {output_logfile} for more information.')
+
+      except KeyboardInterrupt as err:
+        print(f'\nProgram terminated by user via KeyboardInterrupt')
+        print(f'Total elapsed time: {time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time))}')
