@@ -39,9 +39,9 @@ reclass_spec: PixelRemapSpecs = {
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(description="Read a single parcel feature layer from an ESRI geodatabase, split it into chunks, calculate cropland data layer pixel coverage for each parcel, and the save to a GeoPackage.")
-  parser.add_argument('--gdb_path', required=True, type=str, help="Path to the ESRI geodatabase.")
+  parser.add_argument('--gdb_path', required=True, type=str, help="Path to the ESRI geodatabase containing parcel data.")
   parser.add_argument('--layer_name', required=True, type=str, help="Name of the feature layer.")
-  parser.add_argument('--id_key', required=True, type=str, help="Column name of the unique identifier for the parcels. Will be truncated to 10 characters.")
+  parser.add_argument('--id_key', required=True, type=str, help="Column name of the unique identifier for the parcels. The column name will be truncated to 10 characters. Will be read as a string column. If the value is not unique or it is null, the row's ogs_fid or index will be used.")
   parser.add_argument('--output_gpkg', required=True, type=str, help="Path to the output GeoPackage.")
   parser.add_argument('--chunk_size', type=int, default=50000, help="Number of features per chunk (default is 1000).")
   parser.add_argument('--filter_layer_path', type=str, help="The file path to a shapefile to filter out features. The filter is a spatial within. Can be inverted with --invert-filter.")
@@ -100,7 +100,28 @@ if __name__ == '__main__':
           # read the feature layer from the geodatabase
           with alive_bar(title='Reading feature layer from geodatabase', monitor=False) as bar:
             gdb_name = os.path.basename(args.gdb_path)
-            gdf = geopandas.read_file(args.gdb_path, layer=args.layer_name, engine='pyogrio', use_arrow=True, columns=[args.id_key, 'lat', 'lon'])
+            gdf = geopandas.read_file(args.gdb_path, layer=args.layer_name, engine='pyogrio', use_arrow=True, fid_as_index=True, columns=[args.id_key, 'lat', 'lon'])
+            gdf[args.id_key] = gdf[args.id_key].astype(str)
+            gdf['INPUT_FID'] = gdf.index + 1
+            gdf.reset_index(drop=True, inplace=True)
+
+            # replace null values with the prefixed value from ogc_fid or index
+            null_mask = gdf[args.id_key].isnull()
+            if null_mask.any():  # check if there are any null entries
+                if 'INPUT_FID' in gdf.columns:
+                    gdf.loc[null_mask, args.id_key] = 'NULL[[INPUT_FID]]' + gdf.loc[null_mask, 'INPUT_FID'].astype(str)
+                else:
+                    gdf.loc[null_mask, args.id_key] = 'NULL[[index]]' + gdf.loc[null_mask].index.astype(str)
+
+            # replace non-unique values of id_key with the prefixed value from ogc_fid or index
+            non_unique_mask = gdf.duplicated(args.id_key, keep=False)
+            if non_unique_mask.any():  # check if there are any non-unique entries
+              if 'INPUT_FID' in gdf.columns:
+                  gdf.loc[non_unique_mask, args.id_key] = gdf.loc[non_unique_mask, args.id_key] + '[[INPUT_FID]]' + gdf.loc[non_unique_mask, 'INPUT_FID'].astype(str)
+              else:
+                  gdf.loc[non_unique_mask, args.id_key] = gdf.loc[non_unique_mask, args.id_key] + '[[index]]' + gdf.loc[non_unique_mask].index.astype(str)
+
+            # rename the id_key column to the first 10 characters
             gdf = gdf.rename(columns={ args.id_key: args.id_key[0:10] })
 
           # split the feature layer into chunks
@@ -144,6 +165,7 @@ if __name__ == '__main__':
           with alive_bar(len(chunk_names), title='Saving chunks to shapefiles') as bar:
             for chunk_name in chunk_names:
               chunk_gdf = geopandas.read_file(gpkg_path, layer=chunk_name, engine='pyogrio', use_arrow=True)
+              chunk_gdf[args.id_key[0:10]] = chunk_gdf[args.id_key[0:10]].astype(str)
               chunk_gdf.to_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp')
               bar()
           
@@ -187,9 +209,11 @@ if __name__ == '__main__':
           with alive_bar(2 * len(chunk_names), title='Merging chunked layers') as bar:
             for chunk_name in chunk_names:
               chunk_counts_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL counts', engine='pyogrio', use_arrow=True)
+              chunk_counts_gdf[args.id_key[0:10]] = chunk_counts_gdf[args.id_key[0:10]].astype(str)
               merged_counts_gdf = pandas.concat([merged_counts_gdf, chunk_counts_gdf], ignore_index=True)
               bar()
               chunk_trajectories_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL pixel trajectories', engine='pyogrio', use_arrow=True)
+              chunk_trajectories_gdf[args.id_key[0:10]] = chunk_trajectories_gdf[args.id_key[0:10]].astype(str)
               merged_trajectories_gdf = pandas.concat([merged_trajectories_gdf, chunk_trajectories_gdf], ignore_index=True)
               bar()
             

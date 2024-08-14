@@ -87,12 +87,14 @@ def summarize_raster(input_raster_path: str, summary_output_path: str | None = N
   return feature_metadata
 
 @functools.cache
-def read_feature_layer(feature_layer_path: str) -> geopandas.GeoDataFrame:
+def read_feature_layer(feature_layer_path: str, id_key: str) -> geopandas.GeoDataFrame:
   '''
   Open a feature layer from file path and return it as a GeoDataFrame.
   This function's result is cached to prevent multiple reads of the same file.
   '''
-  return geopandas.read_file(feature_layer_path, engine='pyogrio', use_arrow=True)
+  gdf = geopandas.read_file(feature_layer_path, engine='pyogrio', use_arrow=True)
+  gdf[id_key] = gdf[id_key].astype(str)
+  return gdf
   
 def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key: str, output_folder_path: str | None = None, *, status: Status | None = None, status_prefix: str = '', show_progress_bar: bool = False, shared_counter: Optional[ValueProxy[int]] = None, lock: Optional[SyncManager.Lock] = None) -> list[dict[str, Any]]:
   raster_root, raster_ext = os.path.splitext(raster.name)
@@ -103,7 +105,7 @@ def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key
   # open the vector feature layer
   if status: status.update(f'{status_prefix}Opening feature layer...')
   with alive_bar(title='Opening feature layer', disable=not show_progress_bar, monitor=False) as bar:
-    feature_layer = read_feature_layer(feature_layer_path)
+    feature_layer = read_feature_layer(feature_layer_path, id_key)
   if status: status.console.log(f'{status_prefix}feature layer loaded')
   
   # loop through each feature in the feature layer

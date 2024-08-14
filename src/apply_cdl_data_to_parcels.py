@@ -114,8 +114,8 @@ def apply_cdl_data_to_parcels(
     tidy += breakdowns_with_year
   with alive_bar(title='Creating data frame', monitor=False):
     tidy_df = pandas.json_normalize(tidy)
-    # convert the id to a string with length 13
-    tidy_df['id'] = tidy_df['id'].apply('{:0>13}'.format)
+    # ensure id is a string
+    tidy_df['id'] = tidy_df['id'].astype(str)
     # console.log(f'Summary data saved to {parcels_summary_file_root}.json')
   
   # save the `summary_data` list to tidy CSV file
