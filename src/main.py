@@ -158,10 +158,12 @@ if __name__ == '__main__':
         merged_trajectories_gdf = geopandas.GeoDataFrame()
         with alive_bar(2 * len(chunk_names), title='Merging chunked layers') as bar:
           for chunk_name in chunk_names:
-            chunk_counts_gdf = geopandas.read_file('./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL counts', engine='pyogrio', use_arrow=True)
-            merged_counts_gdf = merged_counts_gdf.append(gdf, ignore_index=True)
-            chunk_trajectories_gdf = geopandas.read_file('./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL pixel trajectories', engine='pyogrio', use_arrow=True)
-            merged_trajectories_gdf = merged_trajectories_gdf.append(gdf, ignore_index=True)
+            chunk_counts_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL counts', engine='pyogrio', use_arrow=True)
+            merged_counts_gdf = pandas.concat([merged_counts_gdf, chunk_counts_gdf], ignore_index=True)
+            bar()
+            chunk_trajectories_gdf = geopandas.read_file(f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg', layer='Parcels with CDL pixel trajectories', engine='pyogrio', use_arrow=True)
+            merged_trajectories_gdf = pandas.concat([merged_trajectories_gdf, chunk_trajectories_gdf], ignore_index=True)
+            bar()
           
         # save merged layers to the output GeoPackage
         with alive_bar(2, title='Saving merged layers', monitor=False) as bar:
