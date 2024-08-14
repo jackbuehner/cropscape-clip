@@ -120,7 +120,7 @@ def process_feature_layer(raster: DatasetReader, feature_layer_path: str, id_key
       output_json_file = f'{output_folder}/{raster_name}__{feature_layer_name}.json'
       if (not os.path.isdir(output_folder)):
         if status: status.update(f'{loop_status_prefix}Creating folder {output_folder}...')
-        os.makedirs(output_folder)
+        os.makedirs(output_folder, exist_ok=True)
         if status: status.console.log(f'{loop_status_prefix}Folder {output_folder} created')
       
       # clip raster
