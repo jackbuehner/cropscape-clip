@@ -145,7 +145,7 @@ if __name__ == '__main__':
             consolidated_rasters_folder='./working/consolidated', # folder for consolidated cropland data layer rasters
             reclass_spec=reclass_spec,
             parcels_shp_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}.shp',
-            id_key=args.id_key,
+            id_key=args.id_key[:10],
             parcels_summary_file=f'{args.summary_output_folder_path}/{chunk_name}__summary_data.json',
             clipped_parcels_rasters_folder='./working/clipped_parcels_rasters',
             parcels_trajectories_file=f'{args.summary_output_folder_path}/{chunk_name}__trajectories.json',
