@@ -1,0 +1,7 @@
+__pycache__
+.git
+.mypy_cache
+.vscode
+input
+logging
+working
