@@ -113,13 +113,14 @@ if __name__ == '__main__':
             bar()
                       
         # create a new geopackage without urban area parcels
-        filter_spatial_within(
-          input_layer_path=chunked_gpkg_path,
-          filter_layer_path=args.filter_layer_path,
-          output_layer_path=filtered_chunked_gpkg_path,
-          invert=args.invert_filter,
-          loop_print='\n' + '─' * max_cols + '\nFiltering (spatial within) for chunk "{chunk_name}" ({count}/{total})...'
-        )
+        if (args.filter_layer_path):
+          filter_spatial_within(
+            input_layer_path=chunked_gpkg_path,
+            filter_layer_path=args.filter_layer_path,
+            output_layer_path=filtered_chunked_gpkg_path,
+            invert=args.invert_filter,
+            loop_print='\n' + '─' * max_cols + '\nFiltering (spatial within) for chunk "{chunk_name}" ({count}/{total})...'
+          )
                 
         # create a list of the chunked layers by reading the GeoPackage
         gpkg_path = filtered_chunked_gpkg_path if args.filter_layer_path else chunked_gpkg_path
