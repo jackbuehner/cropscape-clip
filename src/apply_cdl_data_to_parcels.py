@@ -31,7 +31,9 @@ def apply_cdl_data_to_parcels(
   clipped_parcels_rasters_folder: str,
   parcels_summary_file: str,
   parcels_trajectories_file: str,
-  parcels_gpkg_output_path: str
+  parcels_gpkg_output_path: str,
+  *,
+  skip_raster_clipping_and_reclassifying: bool = False
 ) -> None:
   """
   Executes the main workflow for processing cropscape data and generating summary and trajectory data for parcels.
@@ -59,17 +61,18 @@ def apply_cdl_data_to_parcels(
   status = console.status('[bold green]Working...[/bold green]')
   status.start()
 
-  # limit to our area of interest by clipping first, which will also make subsequent steps faster
-  status.update('Clipping cropscape data to area of interest...')
-  clip_cropscape_to_area_of_interest(cropscape_input_folder, area_of_interest_shapefile, clipped_rasters_folder)
-  console.log('Cropscape data clipped to area of interest')
+  if not skip_raster_clipping_and_reclassifying:
+    # limit to our area of interest by clipping first, which will also make subsequent steps faster
+    status.update('Clipping cropscape data to area of interest...')
+    clip_cropscape_to_area_of_interest(cropscape_input_folder, area_of_interest_shapefile, clipped_rasters_folder)
+    console.log('Cropscape data clipped to area of interest')
   
-  # Consolidate cropland data by reclassifying cropland data layer rasters
-  # such that cropland is a single pixel value. Other pixel types are also
-  # grouped together (e.g, all forest, all develolped land, all cropland, etc.).
-  status.update('Consolidating cropland classes...')
-  reclassify_rasters(clipped_rasters_folder, consolidated_rasters_folder, reclass_spec)
-  console.log('Cropland classess consolidated')
+    # Consolidate cropland data by reclassifying cropland data layer rasters
+    # such that cropland is a single pixel value. Other pixel types are also
+    # grouped together (e.g, all forest, all develolped land, all cropland, etc.).
+    status.update('Consolidating cropland classes...')
+    reclassify_rasters(clipped_rasters_folder, consolidated_rasters_folder, reclass_spec)
+    console.log('Cropland classess consolidated')
 
   # create a list containing the paths to all consilidated rasters
   # so we can easily loop through them later

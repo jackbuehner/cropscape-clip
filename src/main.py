@@ -150,7 +150,8 @@ if __name__ == '__main__':
             parcels_summary_file=f'{args.summary_output_folder_path}/{chunk_name}__summary_data.json',
             clipped_parcels_rasters_folder='./working/clipped_parcels_rasters',
             parcels_trajectories_file=f'{args.summary_output_folder_path}/{chunk_name}__trajectories.json',
-            parcels_gpkg_output_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg'
+            parcels_gpkg_output_path=f'./working/{gdb_name}/{args.layer_name}__{chunk_name}__output.gpkg',
+            skip_raster_clipping_and_reclassifying=index > 0
           )
           #args.output_gpkg
         
